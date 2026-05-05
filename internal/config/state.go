@@ -1,0 +1,71 @@
+package config
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+type State struct {
+	LastTeamID  string    `json:"last_team_id"`
+	LastFilter  string    `json:"last_filter"`
+	CompactMode bool      `json:"compact_mode"`
+	WindowW     int       `json:"window_w,omitempty"`
+	WindowH     int       `json:"window_h,omitempty"`
+	Fonts       FontPrefs `json:"fonts,omitempty"`
+}
+
+// FontPref is the persisted form of ui.FontStyle. Mirrored here so the
+// config package stays free of UI imports.
+type FontPref struct {
+	Face string  `json:"face,omitempty"`
+	Size float32 `json:"size,omitempty"`
+}
+
+// FontPrefs mirrors ui.SectionFonts.
+type FontPrefs struct {
+	Global      FontPref `json:"global,omitempty"`
+	Sidebar     FontPref `json:"sidebar,omitempty"`
+	IssueList   FontPref `json:"issue_list,omitempty"`
+	IssueDetail FontPref `json:"issue_detail,omitempty"`
+	StatusBar   FontPref `json:"status_bar,omitempty"`
+	Modal       FontPref `json:"modal,omitempty"`
+	Code        FontPref `json:"code,omitempty"`
+}
+
+func statePath() string {
+	if dir, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(dir, "wllinear", "state.json")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "wllinear", "state.json")
+}
+
+func DBPath() string {
+	return filepath.Join(filepath.Dir(statePath()), "cache.sqlite")
+}
+
+// LoadState reads persisted UI state from disk. Missing or corrupt → defaults.
+func LoadState() *State {
+	state := &State{}
+	if data, err := os.ReadFile(statePath()); err == nil {
+		_ = json.Unmarshal(data, state)
+	}
+	if state.LastFilter == "" {
+		state.LastFilter = "My Issues + Active"
+	}
+	return state
+}
+
+func SaveState(state *State) error {
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal state: %w", err)
+	}
+	path := statePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create state dir: %w", err)
+	}
+	return os.WriteFile(path, data, 0o600)
+}
