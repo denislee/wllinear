@@ -126,12 +126,21 @@ func fetchTeamMetadata(s *State, teamID string) {
 }
 
 func fetchWorkflowStates(s *State, teamID string) {
+	// 1. Try loading from local cache for immediate display.
+	if cached, err := s.DB.GetWorkflowStates(teamID); err == nil && len(cached) > 0 {
+		post(s, WorkflowStatesLoaded{TeamID: teamID, States: cached, FromCache: true})
+	}
+
+	// 2. Fetch from network in the background.
 	states, err := s.Client.GetWorkflowStates(teamID)
 	if err != nil {
 		post(s, errStatus(err))
 		return
 	}
-	post(s, WorkflowStatesLoaded{States: states})
+
+	// 3. Update cache and UI with fresh data.
+	_ = s.DB.SaveWorkflowStates(teamID, states)
+	post(s, WorkflowStatesLoaded{TeamID: teamID, States: states})
 }
 
 func fetchMyIssues(s *State) {
@@ -248,6 +257,20 @@ func CopyProjectLastCycle(s *State, project linear.Project) {
 	}
 	post(s, StatusMsg{
 		Text: "Copied " + intStr(len(titles)) + " issues from " + project.Name,
+		Kind: StatusOk,
+	})
+}
+
+// CopyIssue copies the issue's identifier and title to the clipboard using
+// the standard commit-message style template.
+func CopyIssue(s *State, issue linear.Issue) {
+	text := "chore(" + issue.Identifier + "): " + strings.ReplaceAll(issue.Title, ":", ",")
+	if err := clipboard.WriteAll(text); err != nil {
+		post(s, errStatus(err))
+		return
+	}
+	post(s, StatusMsg{
+		Text: "Copied: " + text,
 		Kind: StatusOk,
 	})
 }

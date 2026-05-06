@@ -159,21 +159,28 @@ func (e TeamMetadataLoaded) apply(s *State) {
 	if s.Team != nil {
 		go fetchFilterCounts(s, s.Team.ID, s.Filters)
 	}
-	// Forward to the active create screen or open modal.
+	// Forward to the active create/edit screen or open modal.
 	if s.Create != nil {
 		s.Create.metaReady(s)
+	}
+	if s.Edit != nil {
+		s.Edit.metaReady(s)
 	}
 	if md, ok := s.ModalState.(*CreateModal); ok && s.Modal == ModalCreate {
 		md.metaReady(s)
 	}
-	if md, ok := s.ModalState.(*EditModal); ok && s.Modal == ModalEdit {
-		md.metaReady(s)
-	}
 }
 
-type WorkflowStatesLoaded struct{ States []linear.WorkflowState }
+type WorkflowStatesLoaded struct {
+	TeamID    string
+	States    []linear.WorkflowState
+	FromCache bool
+}
 
 func (e WorkflowStatesLoaded) apply(s *State) {
+	if s.Team != nil && e.TeamID != "" && e.TeamID != s.Team.ID {
+		return // race: user switched teams
+	}
 	if md, ok := s.ModalState.(*StatusModal); ok && s.Modal == ModalStatus {
 		md.SetStates(e.States)
 	}

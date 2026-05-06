@@ -76,12 +76,13 @@ func (a *App) layoutCreateIssue(gtx layout.Context) layout.Dimensions {
 		// Title row
 		formRow(th, fs, "Title", m.FocusIdx == 0, func(gtx layout.Context) layout.Dimensions {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
-			gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(36))
-			gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(36))
-			ed := editorStyle(th, &m.Title, "Issue title", th.Text, fs)
-			if m.FocusIdx == 0 {
-				ed.Color = th.Accent
+			gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(28))
+			gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(28))
+			col := th.Text
+			if m.FocusIdx != 0 {
+				col = th.TextDim
 			}
+			ed := editorStyle(th, &m.Title, "Issue title", col, fs)
 			return widgetBox(gtx, th, ed.Layout)
 		}),
 		rigidSpace(formRowGapDp),
@@ -89,12 +90,13 @@ func (a *App) layoutCreateIssue(gtx layout.Context) layout.Dimensions {
 		// Description row
 		formRow(th, fs, "Description", m.FocusIdx == 1, func(gtx layout.Context) layout.Dimensions {
 			gtx.Constraints.Min.X = gtx.Constraints.Max.X
-			gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(160))
-			gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(160))
-			ed := editorStyle(th, &m.Description, "Description (optional)", th.Text, fs)
-			if m.FocusIdx == 1 {
-				ed.Color = th.Accent
+			gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(96))
+			gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(96))
+			col := th.Text
+			if m.FocusIdx != 1 {
+				col = th.TextDim
 			}
+			ed := editorStyle(th, &m.Description, "Description (optional)", col, fs)
 			return widgetBox(gtx, th, ed.Layout)
 		}),
 		rigidSpace(formRowGapDp),
@@ -103,6 +105,8 @@ func (a *App) layoutCreateIssue(gtx layout.Context) layout.Dimensions {
 		a.layoutFormPriorityRow(m),
 		rigidSpace(formRowGapDp),
 		a.layoutFormStatusRow(m),
+		rigidSpace(formRowGapDp),
+		a.layoutFormAssigneeRow(m),
 		rigidSpace(formRowGapDp),
 		a.layoutFormProjectRow(m),
 		rigidSpace(formRowGapDp),
@@ -267,6 +271,77 @@ func (a *App) layoutFormStatusRow(m *CreateModal) layout.Widget {
 											return th.LabelColor(fs, unit.Sp(11), th.Text, st.Name).Layout(gtx)
 										}),
 									)
+								})
+							})
+						}))
+					}
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+				})(gtx)
+			}),
+		)
+	}
+}
+
+func (a *App) layoutFormAssigneeRow(m *CreateModal) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		th := a.Th
+		fs := th.Fonts.IssueDetail
+
+		if m.Meta == nil || len(m.Meta.Members) == 0 {
+			return formRow(th, fs, "Assignee", false, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return drawDimText(gtx, th, fs, "[ None ]")
+				})
+			})(gtx)
+		}
+
+		if m.AssigneeToggle.Clicked(gtx) {
+			log.Printf("[UI] Assignee toggle clicked! New state: expanded=%v", !m.AssigneeExpanded)
+			m.AssigneeExpanded = !m.AssigneeExpanded
+			m.FocusIdx = 7
+		}
+
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(formRow(th, fs, "Assignee", m.FocusIdx == 7, func(gtx layout.Context) layout.Dimensions {
+				selectedName := "Select Assignee ▾"
+				if m.AssigneeIdx >= 0 && m.AssigneeIdx < len(m.Meta.Members) {
+					u := m.Meta.Members[m.AssigneeIdx]
+					selectedName = u.Name + " ▾"
+					if m.AssigneeExpanded {
+						selectedName = u.Name + " ▴"
+					}
+				}
+
+				return chipBox(gtx, th, &m.AssigneeToggle, m.FocusIdx == 7, func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = gtx.Constraints.Max.X
+					return th.LabelColor(fs, unit.Sp(11), th.Text, selectedName).Layout(gtx)
+				})
+			})),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if !m.AssigneeExpanded {
+					return layout.Dimensions{}
+				}
+				return formRowExpanded(func(gtx layout.Context) layout.Dimensions {
+					children := make([]layout.FlexChild, 0, len(m.Meta.Members))
+					for i := range m.Meta.Members {
+						i := i
+						if i >= len(m.AssigneeClicks) {
+							break
+						}
+						click := &m.AssigneeClicks[i]
+						if click.Clicked(gtx) {
+							log.Printf("[UI] Assignee chip %d clicked", i)
+							m.AssigneeIdx = i
+							m.AssigneeExpanded = false
+						}
+						sel := m.AssigneeIdx == i
+						u := m.Meta.Members[i]
+
+						children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return chipBox(gtx, th, click, sel, func(gtx layout.Context) layout.Dimensions {
+									gtx.Constraints.Min.X = gtx.Constraints.Max.X
+									return th.LabelColor(fs, unit.Sp(11), th.Text, u.Name).Layout(gtx)
 								})
 							})
 						}))

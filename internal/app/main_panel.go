@@ -29,6 +29,10 @@ func (a *App) layoutMain(gtx layout.Context, r image.Rectangle) {
 		a.layoutCreateIssue(gtx)
 		return
 	}
+	if a.State.View == ViewEditIssue {
+		a.layoutEditIssue(gtx)
+		return
+	}
 	if a.State.View == ViewIssueDetail && a.State.Detail != nil {
 		a.layoutIssueDetail(gtx)
 		return
@@ -538,7 +542,7 @@ func formatAge(t time.Time) string {
 	d := time.Since(t)
 	switch {
 	case d < time.Minute:
-		return "just now"
+		return "now"
 	case d < time.Hour:
 		return fmt.Sprintf("%dm", int(d.Minutes()))
 	case d < 24*time.Hour:

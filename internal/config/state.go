@@ -13,6 +13,7 @@ type State struct {
 	CompactMode             bool      `json:"compact_mode"`
 	ShowLabels              bool      `json:"show_labels"`
 	ShowPriority            bool      `json:"show_priority"`
+	HideHints               bool      `json:"hide_hints"`
 	SidebarWidth            int       `json:"sidebar_width"`
 	WindowW                 int       `json:"window_w,omitempty"`
 	WindowH                 int       `json:"window_h,omitempty"`

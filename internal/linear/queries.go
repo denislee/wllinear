@@ -22,6 +22,14 @@ const issueFragment = `
 		id
 		name
 	}
+	cycle {
+		id
+		number
+		name
+		startsAt
+		endsAt
+		completedAt
+	}
 	labels {
 		nodes {
 			id

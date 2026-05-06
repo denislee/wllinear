@@ -25,16 +25,18 @@ type CreateModal struct {
 	CycleIdx    int
 	Priority    int // 0..4
 
-	FocusIdx int  // 0: Title, 1: Desc, 2: Prio, 3: Status, 4: Project, 5: Cycle, 6: Submit
+	FocusIdx int  // 0: Title, 1: Desc, 2: Prio, 3: Status, 4: Project, 5: Cycle, 6: Submit, 7: Assignee
 	FocusSet bool // Tracks if initial focus has been set
 	FocusReq bool // Set to true when we programmatically want to push focus
 
-	StatusExpanded  bool
-	ProjectExpanded bool
-	CycleExpanded   bool
-	StatusToggle    widget.Clickable
-	ProjectToggle   widget.Clickable
-	CycleToggle     widget.Clickable
+	StatusExpanded   bool
+	ProjectExpanded  bool
+	CycleExpanded    bool
+	AssigneeExpanded bool
+	StatusToggle     widget.Clickable
+	ProjectToggle    widget.Clickable
+	CycleToggle      widget.Clickable
+	AssigneeToggle   widget.Clickable
 
 	Submit widget.Clickable
 	Cancel widget.Clickable
@@ -180,17 +182,33 @@ type EditModal struct {
 	Title       widget.Editor
 	Description widget.Editor
 
+	// Selected indices into Meta lists (-1 = none).
 	StateIdx    int
 	AssigneeIdx int
 	ProjectIdx  int
-	Priority    int
+	CycleIdx    int
+	Priority    int // 0..4
+
+	FocusIdx int  // 0: Title, 1: Desc, 2: Prio, 3: Status, 4: Project, 5: Cycle, 6: Submit, 7: Assignee
+	FocusSet bool // Tracks if initial focus has been set
+	FocusReq bool // Set to true when we programmatically want to push focus
+
+	StatusExpanded   bool
+	ProjectExpanded  bool
+	CycleExpanded    bool
+	AssigneeExpanded bool
+	StatusToggle     widget.Clickable
+	ProjectToggle    widget.Clickable
+	CycleToggle      widget.Clickable
+	AssigneeToggle   widget.Clickable
 
 	Submit widget.Clickable
 	Cancel widget.Clickable
-
+	// Click-targets for selection rows.
 	StateClicks    []widget.Clickable
 	AssigneeClicks []widget.Clickable
 	ProjectClicks  []widget.Clickable
+	CycleClicks    []widget.Clickable
 	PrioClicks     [5]widget.Clickable
 
 	Meta *linear.TeamMetadata
@@ -202,6 +220,7 @@ func NewEditModal(s *State, issue linear.Issue) *EditModal {
 		StateIdx:    -1,
 		AssigneeIdx: -1,
 		ProjectIdx:  -1,
+		CycleIdx:    -1,
 		Priority:    issue.Priority,
 	}
 	m.Title.SingleLine = true
@@ -227,6 +246,10 @@ func (m *EditModal) metaReady(s *State) {
 	if len(m.ProjectClicks) != len(s.LeadingProjects) {
 		m.ProjectClicks = make([]widget.Clickable, len(s.LeadingProjects))
 	}
+	if len(m.CycleClicks) != len(m.Meta.Cycles) {
+		m.CycleClicks = make([]widget.Clickable, len(m.Meta.Cycles))
+	}
+
 	for i, st := range m.Meta.States {
 		if st.ID == m.Issue.State.ID {
 			m.StateIdx = i
@@ -245,6 +268,14 @@ func (m *EditModal) metaReady(s *State) {
 		for i, p := range s.LeadingProjects {
 			if p.ID == m.Issue.Project.ID {
 				m.ProjectIdx = i
+				break
+			}
+		}
+	}
+	if m.Issue.Cycle != nil {
+		for i, c := range m.Meta.Cycles {
+			if c.ID == m.Issue.Cycle.ID {
+				m.CycleIdx = i
 				break
 			}
 		}
@@ -276,6 +307,10 @@ func (m *EditModal) Build(s *State) (string, linear.IssueUpdateInput, bool) {
 			id := s.LeadingProjects[m.ProjectIdx].ID
 			in.ProjectID = &id
 		}
+		if m.CycleIdx >= 0 && m.CycleIdx < len(m.Meta.Cycles) {
+			id := m.Meta.Cycles[m.CycleIdx].ID
+			in.CycleID = &id
+		}
 	}
 	return m.Issue.ID, in, true
 }
@@ -288,17 +323,30 @@ type StatusModal struct {
 	Cancel  widget.Clickable
 	Confirm widget.Clickable
 	Clicks  []widget.Clickable
+	List    widget.List
 }
 
 func NewStatusModal(issue linear.Issue) *StatusModal {
-	return &StatusModal{Issue: issue, Idx: -1}
+	m := &StatusModal{Issue: issue, Idx: -1}
+	m.List.Axis = layout.Vertical
+	return m
 }
 
 func (m *StatusModal) SetStates(states []linear.WorkflowState) {
+	// Preserve the user's in-progress selection across a cache→network refresh.
+	var selectedID string
+	if m.Idx >= 0 && m.Idx < len(m.States) {
+		selectedID = m.States[m.Idx].ID
+	}
 	m.States = states
 	m.Clicks = make([]widget.Clickable, len(states))
+	m.Idx = -1
+	target := selectedID
+	if target == "" {
+		target = m.Issue.State.ID
+	}
 	for i, st := range states {
-		if st.ID == m.Issue.State.ID {
+		if st.ID == target {
 			m.Idx = i
 			break
 		}

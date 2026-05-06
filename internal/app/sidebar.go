@@ -87,7 +87,7 @@ func (a *App) buildSidebarRows() []sidebarRow {
 					go CopyProjectLastCycle(st, p)
 				}
 				selected := st.ActiveFilter == "Project: "+p.Name
-				return drawRow(gtx, a.Th, a.Th.Fonts.Sidebar, click, selected, "▶ "+truncate(cleanProjectName(p.Name), 22), "")
+				return drawRow(gtx, a.Th, a.Th.Fonts.Sidebar, click, selected, "▶ "+cleanProjectName(p.Name), "")
 			})
 		}
 	}

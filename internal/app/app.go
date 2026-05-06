@@ -42,6 +42,7 @@ type App struct {
 	listSidebar widget.List
 	detailList  widget.List
 	createList  widget.List
+	editList    widget.List
 
 	helpClick   widget.Clickable
 	createClick widget.Clickable
@@ -70,9 +71,10 @@ func NewApp(w *app.Window, client *linear.Client, d *db.DB, cfg *config.Config, 
 		Compact:      saved.CompactMode,
 		ShowLabels:   saved.ShowLabels,
 		ShowPriority: saved.ShowPriority,
+		HideHints:    saved.HideHints,
 		SidebarWidth: saved.SidebarWidth,
 		Focus:        FocusSidebar,
-		HintsText:    "tab: switch panel  •  c: create  •  ctrl+k: search  •  ,: settings  •  ?: help",
+		HintsText:    "tab: switch panel  •  c: create  •  ctrl+k: search  •  ,: settings  •  ?: toggle bar • F1: help",
 		StatusText:   "Connecting to Linear...",
 	}
 	st.rebuildFilters()
@@ -82,6 +84,7 @@ func NewApp(w *app.Window, client *linear.Client, d *db.DB, cfg *config.Config, 
 	a.listSidebar.Axis = layout.Vertical
 	a.detailList.Axis = layout.Vertical
 	a.createList.Axis = layout.Vertical
+	a.editList.Axis = layout.Vertical
 
 	st.Wakeup = w.Invalidate
 
@@ -121,6 +124,7 @@ func (a *App) saveState() {
 		CompactMode:             st.Compact,
 		ShowLabels:              st.ShowLabels,
 		ShowPriority:            st.ShowPriority,
+		HideHints:               st.HideHints,
 		SidebarWidth:            st.SidebarWidth,
 		Fonts:                   fontPrefsToConfig(a.Th.Fonts),
 		DefaultCreateStatusType: defaultStatus,
@@ -167,6 +171,9 @@ func (a *App) layout(gtx layout.Context) {
 	// Statusbar reserves the bottom row.
 	statusH := gtx.Dp(unit.Dp(28))
 	hintsH := gtx.Dp(unit.Dp(22))
+	if a.State.HideHints {
+		hintsH = 0
+	}
 	bottomH := statusH + hintsH
 
 	body := image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y-bottomH)
@@ -268,9 +275,11 @@ func (a *App) layoutStatusBar(gtx layout.Context, r image.Rectangle) {
 
 	// Hints row (top portion).
 	hintsH := gtx.Dp(unit.Dp(22))
-	{
+	if !a.State.HideHints {
 		defer op.Offset(image.Pt(gtx.Dp(unit.Dp(8)), gtx.Dp(unit.Dp(3)))).Push(gtx.Ops).Pop()
 		a.drawStatusText(gtx, a.Th.TextDim, a.State.HintsText)
+	} else {
+		hintsH = 0
 	}
 
 	// Status text row.
@@ -349,6 +358,7 @@ func (a *App) handleGlobalKeys(gtx layout.Context) {
 			key.Filter{Name: "C"},
 			key.Filter{Name: "V"},
 			key.Filter{Name: "?"},
+			key.Filter{Name: key.NameF1},
 			key.Filter{Name: "/"},
 			key.Filter{Name: ","},
 			key.Filter{Name: "K", Required: key.ModCtrl},
@@ -426,6 +436,34 @@ func isPrintableHotkey(name key.Name) bool {
 func (a *App) handleKey(ke key.Event) {
 	st := a.State
 
+	// Global toggles that work everywhere (unless blocked by editor focus in handleGlobalKeys).
+	switch ke.Name {
+	case "?":
+		st.HideHints = !st.HideHints
+		a.saveState()
+		return
+	case key.NameF1:
+		a.openHelp()
+		return
+	case "V":
+		if ke.Modifiers == 0 {
+			st.Compact = !st.Compact
+			a.saveState()
+			return
+		}
+	case "P":
+		if ke.Modifiers == 0 {
+			st.ShowPriority = !st.ShowPriority
+			a.saveState()
+			return
+		}
+	case ",":
+		if ke.Modifiers == 0 {
+			a.openSettings()
+			return
+		}
+	}
+
 	if st.Modal != ModalNone {
 		a.handleModalKey(ke)
 		return
@@ -477,6 +515,52 @@ func (a *App) handleKey(ke key.Event) {
 		return
 	}
 
+	if st.View == ViewEditIssue {
+		m := st.Edit
+		if m != nil {
+			switch ke.Name {
+			case key.NameEscape:
+				a.closeEdit()
+			case "[":
+				if ke.Modifiers.Contain(key.ModCtrl) {
+					a.closeEdit()
+				}
+			case key.NameTab:
+				if ke.Modifiers.Contain(key.ModShift) {
+					m.FocusIdx = (m.FocusIdx + 6) % 7
+				} else {
+					m.FocusIdx = (m.FocusIdx + 1) % 7
+				}
+				m.FocusReq = true
+			case "J", key.NameDownArrow, key.NameRightArrow:
+				if m.FocusIdx == 2 {
+					m.Priority = clamp(m.Priority+1, 0, 4)
+				} else if m.FocusIdx == 3 && m.Meta != nil {
+					m.StateIdx = clamp(m.StateIdx+1, 0, len(m.Meta.States)-1)
+				} else if m.FocusIdx == 4 {
+					m.ProjectIdx = clamp(m.ProjectIdx+1, 0, len(a.State.LeadingProjects)-1)
+				} else if m.FocusIdx == 5 && m.Meta != nil {
+					m.CycleIdx = clamp(m.CycleIdx+1, 0, len(m.Meta.Cycles)-1)
+				}
+			case "K", key.NameUpArrow, key.NameLeftArrow:
+				if m.FocusIdx == 2 {
+					m.Priority = clamp(m.Priority-1, 0, 4)
+				} else if m.FocusIdx == 3 && m.Meta != nil {
+					m.StateIdx = clamp(m.StateIdx-1, 0, len(m.Meta.States)-1)
+				} else if m.FocusIdx == 4 {
+					m.ProjectIdx = clamp(m.ProjectIdx-1, 0, len(a.State.LeadingProjects)-1)
+				} else if m.FocusIdx == 5 && m.Meta != nil {
+					m.CycleIdx = clamp(m.CycleIdx-1, 0, len(m.Meta.Cycles)-1)
+				}
+			case key.NameReturn:
+				if m.FocusIdx == 6 {
+					a.confirmEditScreen()
+				}
+			}
+		}
+		return
+	}
+
 	switch ke.Name {
 	case key.NameEscape:
 		if st.View == ViewIssueDetail {
@@ -501,22 +585,8 @@ func (a *App) handleKey(ke key.Event) {
 	}
 
 	switch ke.Name {
-	case "?":
-		st.Modal = ModalHelp
-		return
-	case ",":
-		a.openSettings()
-		return
 	case "C":
 		a.openCreate()
-		return
-	case "V":
-		st.Compact = !st.Compact
-		a.saveState()
-		return
-	case "P":
-		st.ShowPriority = !st.ShowPriority
-		a.saveState()
 		return
 	case "F":
 		if ke.Modifiers == key.ModCtrl {
@@ -641,8 +711,12 @@ func (a *App) handleKey(ke key.Event) {
 		}
 		return
 	case "Y":
-		if st.Focus == FocusMain && st.View == ViewProjectCycles {
-			a.copySelectedCycleIssues()
+		if st.View == ViewProjectCycles {
+			if st.Focus == FocusMain {
+				a.copySelectedCycleIssues()
+			}
+		} else if is := a.currentIssue(); is != nil {
+			CopyIssue(st, *is)
 		}
 		return
 	case "Q":
@@ -660,26 +734,30 @@ func (a *App) handleKey(ke key.Event) {
 func (a *App) updateHints() {
 	st := a.State
 	if st.Modal != ModalNone {
-		st.HintsText = "tab: fields  •  enter: submit  •  esc: cancel"
+		st.HintsText = "tab: fields  •  enter: submit  •  esc: cancel  •  ?: toggle bar  •  F1: help"
 		return
 	}
 	if st.View == ViewCreateIssue {
 		st.HintsText = "esc: cancel  •  click Create Issue to submit"
 		return
 	}
+	if st.View == ViewEditIssue {
+		st.HintsText = "esc: cancel  •  click Save Changes to submit"
+		return
+	}
 	if st.View == ViewIssueDetail {
-		st.HintsText = "esc/h: back  •  e: edit  •  s: status  •  ?: help"
+		st.HintsText = "esc/h: back  •  e: edit  •  s: status  •  ?: toggle bar • F1: help"
 		return
 	}
 	switch st.Focus {
 	case FocusSidebar:
-		st.HintsText = "j/k: navigate  •  enter/l: select  •  c: create  •  ctrl+k: search  •  tab: issues  •  ?: help"
+		st.HintsText = "j/k: navigate  •  enter/l: select  •  c: create  •  ctrl+k: search  •  tab: issues  •  ?: toggle bar • F1: help"
 	case FocusMain:
-		hints := "j/k: navigate  •  enter: browser  •  l: open  •  e: edit  •  s: status  •  c: create  •  v: compact  •  t: tags  •  r: refresh  •  ?: help"
+		hints := "j/k: navigate  •  enter: browser  •  l: open  •  e: edit  •  s: status  •  c: create  •  v: compact  •  t: tags  •  r: refresh  •  ?: toggle bar • F1: help"
 		if st.View == ViewProjectCycles {
-			hints = "j/k: navigate  •  space/enter: expand  •  y: copy issues  •  r: refresh  •  ?: help"
+			hints = "j/k: navigate  •  space/enter: expand  •  y: copy issues  •  r: refresh  •  ?: toggle bar • F1: help"
 		} else if st.ActiveFilter == "My Unlabeled Issues" {
-			hints = "t: auto-label  •  j/k: navigate  •  enter: browser  •  l: open  •  e: edit  •  s: status  •  c: create  •  v: compact  •  r: refresh  •  ?: help"
+			hints = "t: auto-label  •  j/k: navigate  •  enter: browser  •  l: open  •  e: edit  •  s: status  •  c: create  •  v: compact  •  r: refresh  •  ?: toggle bar • F1: help"
 		}
 		st.HintsText = hints
 	}
@@ -872,12 +950,34 @@ func (a *App) confirmCreateScreen() {
 
 func (a *App) openEdit(issue linear.Issue) {
 	st := a.State
-	st.Modal = ModalEdit
-	st.ModalState = NewEditModal(st, issue)
+	st.View = ViewEditIssue
+	st.Detail = nil
+	st.Edit = NewEditModal(st, issue)
 	if st.Team != nil && st.Meta == nil {
 		go fetchTeamMetadata(st, st.Team.ID)
 	}
 	a.updateHints()
+}
+
+func (a *App) closeEdit() {
+	a.State.Edit = nil
+	a.State.View = ViewIssueList
+	a.updateHints()
+}
+
+func (a *App) confirmEditScreen() {
+	st := a.State
+	if st.Edit == nil {
+		return
+	}
+	id, in, valid := st.Edit.Build(st)
+	if !valid {
+		st.StatusText = "Title is required"
+		st.StatusKind = StatusWarn
+		return
+	}
+	go editIssue(st, id, in)
+	a.closeEdit()
 }
 
 func (a *App) openStatus(issue linear.Issue) {
@@ -915,6 +1015,16 @@ func (a *App) openTeam() {
 		m.SetTeams(st.Teams)
 	}
 	a.updateHints()
+}
+
+func (a *App) openHelp() {
+	st := a.State
+	if st.Modal == ModalHelp {
+		a.closeModal()
+	} else {
+		st.Modal = ModalHelp
+		a.updateHints()
+	}
 }
 
 func (a *App) closeModal() {

@@ -21,6 +21,7 @@ const (
 	ViewIssueDetail
 	ViewProjectCycles
 	ViewCreateIssue
+	ViewEditIssue
 )
 
 // Modal identifies which overlay is open (or none).
@@ -71,11 +72,13 @@ type State struct {
 	Compact       bool
 	ShowLabels    bool
 	ShowPriority  bool
+	HideHints     bool
 	SidebarWidth  int
 
 	View   View
 	Detail *linear.Issue
 	Create *CreateModal // populated while View == ViewCreateIssue
+	Edit   *EditModal   // populated while View == ViewEditIssue
 
 	Focus Focus
 

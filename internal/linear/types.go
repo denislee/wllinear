@@ -73,6 +73,7 @@ type Issue struct {
 	State       WorkflowState `json:"state"`
 	Assignee    *User         `json:"assignee"`
 	Project     *Project      `json:"project"`
+	Cycle       *Cycle        `json:"cycle"`
 	Labels      struct {
 		Nodes []Label `json:"nodes"`
 	} `json:"labels"`
@@ -113,4 +114,5 @@ type IssueUpdateInput struct {
 	AssigneeID  *string `json:"assigneeId,omitempty"`
 	Priority    *int    `json:"priority,omitempty"`
 	ProjectID   *string `json:"projectId,omitempty"`
+	CycleID     *string `json:"cycleId,omitempty"`
 }
