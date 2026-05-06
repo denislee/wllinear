@@ -1,6 +1,7 @@
 package app
 
 import (
+	"log"
 	"strings"
 	"time"
 
@@ -24,9 +25,9 @@ type CreateModal struct {
 	CycleIdx    int
 	Priority    int // 0..4
 
-	FocusIdx    int  // 0: Title, 1: Desc, 2: Prio, 3: Status, 4: Project, 5: Cycle, 6: Submit
-	FocusSet    bool // Tracks if initial focus has been set
-	FocusReq    bool // Set to true when we programmatically want to push focus
+	FocusIdx int  // 0: Title, 1: Desc, 2: Prio, 3: Status, 4: Project, 5: Cycle, 6: Submit
+	FocusSet bool // Tracks if initial focus has been set
+	FocusReq bool // Set to true when we programmatically want to push focus
 
 	StatusExpanded  bool
 	ProjectExpanded bool
@@ -71,10 +72,19 @@ func (m *CreateModal) metaReady(s *State) {
 	if m.Meta == nil {
 		return
 	}
-	m.StateClicks = make([]widget.Clickable, len(m.Meta.States))
-	m.AssigneeClicks = make([]widget.Clickable, len(m.Meta.Members))
-	m.ProjectClicks = make([]widget.Clickable, len(m.Meta.Projects))
-	m.CycleClicks = make([]widget.Clickable, len(m.Meta.Cycles))
+	log.Printf("[App] CreateModal metaReady: %d cycles", len(m.Meta.Cycles))
+	if len(m.StateClicks) != len(m.Meta.States) {
+		m.StateClicks = make([]widget.Clickable, len(m.Meta.States))
+	}
+	if len(m.AssigneeClicks) != len(m.Meta.Members) {
+		m.AssigneeClicks = make([]widget.Clickable, len(m.Meta.Members))
+	}
+	if len(m.ProjectClicks) != len(m.Meta.Projects) {
+		m.ProjectClicks = make([]widget.Clickable, len(m.Meta.Projects))
+	}
+	if len(m.CycleClicks) != len(m.Meta.Cycles) {
+		m.CycleClicks = make([]widget.Clickable, len(m.Meta.Cycles))
+	}
 	if m.AssigneeIdx == -1 && s.User != nil {
 		for i, u := range m.Meta.Members {
 			if u.ID == s.User.ID {
@@ -84,11 +94,23 @@ func (m *CreateModal) metaReady(s *State) {
 		}
 	}
 	if m.StateIdx == -1 {
-		// Default to first 'unstarted' or 'backlog' state.
+		preferred := "started"
+		if s.Saved != nil && s.Saved.DefaultCreateStatusType != "" {
+			preferred = s.Saved.DefaultCreateStatusType
+		}
 		for i, st := range m.Meta.States {
-			if st.Type == "unstarted" || st.Type == "backlog" {
+			if st.Type == preferred {
 				m.StateIdx = i
 				break
+			}
+		}
+		// Fall back to unstarted/backlog, then first state.
+		if m.StateIdx == -1 {
+			for i, st := range m.Meta.States {
+				if st.Type == "unstarted" || st.Type == "backlog" {
+					m.StateIdx = i
+					break
+				}
 			}
 		}
 		if m.StateIdx == -1 && len(m.Meta.States) > 0 {
@@ -98,7 +120,12 @@ func (m *CreateModal) metaReady(s *State) {
 	if m.CycleIdx == -1 {
 		now := time.Now()
 		for i, c := range m.Meta.Cycles {
-			if c.StartsAt.Before(now) && c.EndsAt.After(now) {
+			// Skip completed cycles.
+			if c.CompletedAt != nil && !c.CompletedAt.IsZero() {
+				continue
+			}
+			// Active cycle check.
+			if (c.StartsAt.Before(now) || c.StartsAt.Equal(now)) && (c.EndsAt.After(now) || c.EndsAt.Equal(now)) {
 				m.CycleIdx = i
 				break
 			}
@@ -191,9 +218,15 @@ func (m *EditModal) metaReady(s *State) {
 	if m.Meta == nil {
 		return
 	}
-	m.StateClicks = make([]widget.Clickable, len(m.Meta.States))
-	m.AssigneeClicks = make([]widget.Clickable, len(m.Meta.Members))
-	m.ProjectClicks = make([]widget.Clickable, len(s.LeadingProjects))
+	if len(m.StateClicks) != len(m.Meta.States) {
+		m.StateClicks = make([]widget.Clickable, len(m.Meta.States))
+	}
+	if len(m.AssigneeClicks) != len(m.Meta.Members) {
+		m.AssigneeClicks = make([]widget.Clickable, len(m.Meta.Members))
+	}
+	if len(m.ProjectClicks) != len(s.LeadingProjects) {
+		m.ProjectClicks = make([]widget.Clickable, len(s.LeadingProjects))
+	}
 	for i, st := range m.Meta.States {
 		if st.ID == m.Issue.State.ID {
 			m.StateIdx = i
@@ -274,11 +307,11 @@ func (m *StatusModal) SetStates(states []linear.WorkflowState) {
 
 // SearchModal is the issue search overlay (Ctrl+K).
 type SearchModal struct {
-	Query   widget.Editor
-	Issues  []linear.Issue
+	Query    widget.Editor
+	Issues   []linear.Issue
 	Selected int
-	Cancel  widget.Clickable
-	Clicks  []widget.Clickable
+	Cancel   widget.Clickable
+	Clicks   []widget.Clickable
 }
 
 func NewSearchModal() *SearchModal {
@@ -298,6 +331,26 @@ type SettingsModal struct {
 	Close widget.Clickable
 	Reset widget.Clickable
 	Rows  []*SettingsRow
+
+	// Default-create-status cycler.
+	StatusPrev widget.Clickable
+	StatusNext widget.Clickable
+}
+
+// CreateStatusTypes are the workflow state types selectable as the default
+// status when creating a new issue.
+var CreateStatusTypes = []string{"started", "unstarted", "backlog"}
+
+func createStatusLabel(t string) string {
+	switch t {
+	case "started":
+		return "In Progress"
+	case "unstarted":
+		return "Todo"
+	case "backlog":
+		return "Backlog"
+	}
+	return t
 }
 
 // SettingsRow is one configurable section: a label + face/size click targets.
@@ -341,4 +394,22 @@ func (m *SearchModal) Filter() []linear.Issue {
 		}
 	}
 	return out
+}
+
+// TeamModal is the team selection overlay (Ctrl+T).
+type TeamModal struct {
+	Teams    []linear.Team
+	Selected int
+	Cancel   widget.Clickable
+	Clicks   []widget.Clickable
+}
+
+func NewTeamModal() *TeamModal {
+	m := &TeamModal{Selected: 0}
+	return m
+}
+
+func (m *TeamModal) SetTeams(teams []linear.Team) {
+	m.Teams = teams
+	m.Clicks = make([]widget.Clickable, len(teams))
 }

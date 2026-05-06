@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/denislee/wllinear/internal/linear"
@@ -87,6 +88,12 @@ func (e ProjectSelected) apply(s *State) {
 	s.ActiveFilter = filter
 	s.Selected = 0
 	s.View = ViewProjectCycles
+	// Clear stale cycles from a previously-viewed project so we don't flash old data.
+	if s.CurrentProjectID != e.Project.ID {
+		s.ProjectCycles = nil
+		s.ExpandedCycles = nil
+	}
+	s.CurrentProjectID = e.Project.ID
 	if s.Team != nil {
 		s.StatusText = "Loading cycles for " + e.Project.Name + "..."
 		s.StatusKind = StatusInfo
@@ -97,15 +104,24 @@ func (e ProjectSelected) apply(s *State) {
 type ProjectCyclesLoaded struct {
 	ProjectID string
 	Cycles    []linear.ProjectCycleIssues
+	FromCache bool
 }
 
 func (e ProjectCyclesLoaded) apply(s *State) {
+	if e.ProjectID != s.CurrentProjectID {
+		return // race: user navigated away
+	}
 	s.ProjectCycles = e.Cycles
 	if s.Selected >= len(s.ProjectCycles) {
 		s.Selected = 0
 	}
-	s.StatusText = fmt.Sprintf("Loaded %d cycles", len(e.Cycles))
-	s.StatusKind = StatusOk
+	if e.FromCache {
+		s.StatusText = fmt.Sprintf("Loaded %d cycles (cached, refreshing...)", len(e.Cycles))
+		s.StatusKind = StatusInfo
+	} else {
+		s.StatusText = fmt.Sprintf("Loaded %d cycles", len(e.Cycles))
+		s.StatusKind = StatusOk
+	}
 }
 
 type IssuesLoaded struct {
@@ -137,6 +153,7 @@ func (e TeamMetadataLoaded) apply(s *State) {
 	s.Meta = e.Meta
 	if e.Meta != nil {
 		s.Projects = e.Meta.Projects
+		log.Printf("[App] TeamMetadataLoaded: %d cycles, %d states, %d projects", len(e.Meta.Cycles), len(e.Meta.States), len(e.Meta.Projects))
 	}
 	s.rebuildFilters()
 	if s.Team != nil {
@@ -188,6 +205,7 @@ func (e IssueCreated) apply(s *State) {
 	s.StatusText = "Created " + e.Issue.Identifier
 	s.StatusKind = StatusOk
 	if s.Team != nil {
+		go AutoLabel(s, []linear.Issue{e.Issue})
 		go fetchIssues(s, s.Team.ID, s.ActiveFilter)
 		go fetchFilterCounts(s, s.Team.ID, s.Filters)
 	}

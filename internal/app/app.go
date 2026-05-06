@@ -3,11 +3,14 @@ package app
 import (
 	"image"
 	"image/color"
+	"regexp"
 	"strings"
 
 	"gioui.org/app"
 	"gioui.org/io/event"
 	"gioui.org/io/key"
+	"gioui.org/io/pointer"
+	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -38,12 +41,18 @@ type App struct {
 	listIssues  widget.List
 	listSidebar widget.List
 	detailList  widget.List
+	createList  widget.List
 
 	helpClick   widget.Clickable
 	createClick widget.Clickable
 	searchClick widget.Clickable
 	refreshClick widget.Clickable
 	compactClick widget.Clickable
+
+	resizing       bool
+	dragStartPosX  float32
+	dragStartWidth int
+	splitterTag    struct{}
 }
 
 // NewApp constructs a new App and dispatches the initial fetches.
@@ -59,6 +68,9 @@ func NewApp(w *app.Window, client *linear.Client, d *db.DB, cfg *config.Config, 
 		Events:       make(chan Event, 256),
 		ActiveFilter: saved.LastFilter,
 		Compact:      saved.CompactMode,
+		ShowLabels:   saved.ShowLabels,
+		ShowPriority: saved.ShowPriority,
+		SidebarWidth: saved.SidebarWidth,
 		Focus:        FocusSidebar,
 		HintsText:    "tab: switch panel  •  c: create  •  ctrl+k: search  •  ,: settings  •  ?: help",
 		StatusText:   "Connecting to Linear...",
@@ -69,6 +81,7 @@ func NewApp(w *app.Window, client *linear.Client, d *db.DB, cfg *config.Config, 
 	a.listIssues.Axis = layout.Vertical
 	a.listSidebar.Axis = layout.Vertical
 	a.detailList.Axis = layout.Vertical
+	a.createList.Axis = layout.Vertical
 
 	st.Wakeup = w.Invalidate
 
@@ -99,10 +112,18 @@ func (a *App) Run() error {
 
 func (a *App) saveState() {
 	st := a.State
+	defaultStatus := "started"
+	if st.Saved != nil && st.Saved.DefaultCreateStatusType != "" {
+		defaultStatus = st.Saved.DefaultCreateStatusType
+	}
 	saved := &config.State{
-		LastFilter:  st.ActiveFilter,
-		CompactMode: st.Compact,
-		Fonts:       fontPrefsToConfig(a.Th.Fonts),
+		LastFilter:              st.ActiveFilter,
+		CompactMode:             st.Compact,
+		ShowLabels:              st.ShowLabels,
+		ShowPriority:            st.ShowPriority,
+		SidebarWidth:            st.SidebarWidth,
+		Fonts:                   fontPrefsToConfig(a.Th.Fonts),
+		DefaultCreateStatusType: defaultStatus,
 	}
 	if st.Team != nil {
 		saved.LastTeamID = st.Team.ID
@@ -151,10 +172,57 @@ func (a *App) layout(gtx layout.Context) {
 	body := image.Rect(0, 0, gtx.Constraints.Max.X, gtx.Constraints.Max.Y-bottomH)
 	bottom := image.Rect(0, body.Max.Y, gtx.Constraints.Max.X, gtx.Constraints.Max.Y)
 
-	// Sidebar fixed width.
-	sidebarW := gtx.Dp(unit.Dp(260))
-	if sidebarW > body.Dx()/3 {
-		sidebarW = body.Dx() / 3
+	splitterW := gtx.Dp(unit.Dp(6))
+
+	// Handle sidebar resizing. During a drag gesture Gio anchors the event
+	// area at press time, so Position.X stays in a consistent basis for the
+	// whole gesture — we just diff against the press position.
+	for {
+		ev, ok := gtx.Event(pointer.Filter{
+			Target: &a.splitterTag,
+			Kinds:  pointer.Press | pointer.Drag | pointer.Release | pointer.Cancel,
+		})
+		if !ok {
+			break
+		}
+		p, ok := ev.(pointer.Event)
+		if !ok {
+			continue
+		}
+		switch p.Kind {
+		case pointer.Press:
+			a.resizing = true
+			a.dragStartPosX = p.Position.X
+			a.dragStartWidth = a.State.SidebarWidth
+		case pointer.Drag:
+			if !a.resizing {
+				break
+			}
+			deltaDp := int((p.Position.X - a.dragStartPosX) / gtx.Metric.PxPerDp)
+			newW := a.dragStartWidth + deltaDp
+			if newW < 120 {
+				newW = 120
+			}
+			if newW > 600 {
+				newW = 600
+			}
+			a.State.SidebarWidth = newW
+		case pointer.Release, pointer.Cancel:
+			if a.resizing {
+				a.resizing = false
+				a.saveState()
+			}
+		}
+	}
+
+	sidebarW := gtx.Dp(unit.Dp(float32(a.State.SidebarWidth)))
+	if sidebarW > body.Dx()/2 {
+		sidebarW = body.Dx() / 2
+	}
+	// Auto-hide the sidebar when the main panel has focus, so the issue
+	// list / detail view can use the full width.
+	if a.State.Focus == FocusMain {
+		sidebarW = 0
 	}
 
 	settingsW := 0
@@ -167,9 +235,15 @@ func (a *App) layout(gtx layout.Context) {
 
 	a.layoutSidebar(gtx, image.Rect(body.Min.X, body.Min.Y, body.Min.X+sidebarW, body.Max.Y))
 	a.layoutMain(gtx, image.Rect(body.Min.X+sidebarW, body.Min.Y, body.Max.X-settingsW, body.Max.Y))
-	
-	if a.State.ShowSettings {
-		if a.State.Settings == nil {
+
+	// Draw resizing handle.
+	splitterRect := image.Rect(sidebarW-splitterW/2, 0, sidebarW+splitterW/2, body.Dy())
+	stack := clip.Rect(splitterRect).Push(gtx.Ops)
+	event.Op(gtx.Ops, &a.splitterTag)
+	pointer.CursorEastWestResize.Add(gtx.Ops)
+	stack.Pop()
+
+	if a.State.ShowSettings {		if a.State.Settings == nil {
 			a.State.Settings = NewSettingsModal(a.Th)
 		}
 		a.layoutSettingsSide(gtx, image.Rect(body.Max.X-settingsW, body.Min.Y, body.Max.X, body.Max.Y))
@@ -283,6 +357,7 @@ func (a *App) handleGlobalKeys(gtx layout.Context) {
 			key.Filter{Name: "B", Required: key.ModCtrl},
 			key.Filter{Name: key.NameEscape},
 			key.Filter{Name: key.NameReturn},
+			key.Filter{Name: key.NameSpace},
 			key.Filter{Name: key.NameUpArrow},
 			key.Filter{Name: key.NameDownArrow},
 			key.Filter{Name: "J"},
@@ -293,6 +368,9 @@ func (a *App) handleGlobalKeys(gtx layout.Context) {
 			key.Filter{Name: "E"},
 			key.Filter{Name: "R"},
 			key.Filter{Name: "T"},
+			key.Filter{Name: "T", Required: key.ModCtrl},
+			key.Filter{Name: "P"},
+			key.Filter{Name: "Y"},
 		)
 		if !ok {
 			break
@@ -301,9 +379,48 @@ func (a *App) handleGlobalKeys(gtx layout.Context) {
 		if !ok || ke.State != key.Press {
 			continue
 		}
+		// Don't let printable letter hotkeys steal keystrokes while the user
+		// is typing in an editor. Modifier-bearing combos (Ctrl+K, etc.) and
+		// non-printable keys (Esc, Return, arrows) still pass through.
+		if ke.Modifiers == 0 && a.isEditorFocused(gtx) && isPrintableHotkey(ke.Name) {
+			continue
+		}
 		a.handleKey(ke)
 	}
 	event.Op(gtx.Ops, a)
+}
+
+// isEditorFocused reports whether any of the app's text editors currently
+// holds key focus.
+func (a *App) isEditorFocused(gtx layout.Context) bool {
+	if a.State.Create != nil {
+		if gtx.Focused(&a.State.Create.Title) || gtx.Focused(&a.State.Create.Description) {
+			return true
+		}
+	}
+	switch m := a.State.ModalState.(type) {
+	case *CreateModal:
+		if gtx.Focused(&m.Title) || gtx.Focused(&m.Description) {
+			return true
+		}
+	case *EditModal:
+		if gtx.Focused(&m.Title) || gtx.Focused(&m.Description) {
+			return true
+		}
+	case *SearchModal:
+		if gtx.Focused(&m.Query) {
+			return true
+		}
+	}
+	return false
+}
+
+func isPrintableHotkey(name key.Name) bool {
+	if len(name) != 1 {
+		return false
+	}
+	c := name[0]
+	return (c >= 'A' && c <= 'Z') || c == '?' || c == '/' || c == ','
 }
 
 func (a *App) handleKey(ke key.Event) {
@@ -326,9 +443,9 @@ func (a *App) handleKey(ke key.Event) {
 				}
 			case key.NameTab:
 				if ke.Modifiers.Contain(key.ModShift) {
-					m.FocusIdx = (m.FocusIdx + 5) % 6
+					m.FocusIdx = (m.FocusIdx + 6) % 7
 				} else {
-					m.FocusIdx = (m.FocusIdx + 1) % 6
+					m.FocusIdx = (m.FocusIdx + 1) % 7
 				}
 				m.FocusReq = true
 			case "J", key.NameDownArrow, key.NameRightArrow:
@@ -336,19 +453,23 @@ func (a *App) handleKey(ke key.Event) {
 					m.Priority = clamp(m.Priority+1, 0, 4)
 				} else if m.FocusIdx == 3 && m.Meta != nil { // Status
 					m.StateIdx = clamp(m.StateIdx+1, 0, len(m.Meta.States)-1)
-				} else if m.FocusIdx == 4 && m.Meta != nil { // Project
-					m.ProjectIdx = clamp(m.ProjectIdx+1, 0, len(m.Meta.Projects)-1)
+				} else if m.FocusIdx == 4 { // Project
+					m.ProjectIdx = clamp(m.ProjectIdx+1, 0, len(a.State.LeadingProjects)-1)
+				} else if m.FocusIdx == 5 && m.Meta != nil { // Cycle
+					m.CycleIdx = clamp(m.CycleIdx+1, 0, len(m.Meta.Cycles)-1)
 				}
 			case "K", key.NameUpArrow, key.NameLeftArrow:
 				if m.FocusIdx == 2 { // Priority
 					m.Priority = clamp(m.Priority-1, 0, 4)
 				} else if m.FocusIdx == 3 && m.Meta != nil { // Status
 					m.StateIdx = clamp(m.StateIdx-1, 0, len(m.Meta.States)-1)
-				} else if m.FocusIdx == 4 && m.Meta != nil { // Project
-					m.ProjectIdx = clamp(m.ProjectIdx-1, 0, len(m.Meta.Projects)-1)
+				} else if m.FocusIdx == 4 { // Project
+					m.ProjectIdx = clamp(m.ProjectIdx-1, 0, len(a.State.LeadingProjects)-1)
+				} else if m.FocusIdx == 5 && m.Meta != nil { // Cycle
+					m.CycleIdx = clamp(m.CycleIdx-1, 0, len(m.Meta.Cycles)-1)
 				}
 			case key.NameReturn:
-				if m.FocusIdx == 5 {
+				if m.FocusIdx == 6 {
 					a.confirmCreateScreen()
 				}
 			}
@@ -391,6 +512,11 @@ func (a *App) handleKey(ke key.Event) {
 		return
 	case "V":
 		st.Compact = !st.Compact
+		a.saveState()
+		return
+	case "P":
+		st.ShowPriority = !st.ShowPriority
+		a.saveState()
 		return
 	case "F":
 		if ke.Modifiers == key.ModCtrl {
@@ -470,7 +596,16 @@ func (a *App) handleKey(ke key.Event) {
 			a.activateSidebar()
 			return
 		}
+		if st.View == ViewProjectCycles {
+			a.toggleSelectedCycle()
+			return
+		}
 		a.openSelectedInBrowser()
+		return
+	case key.NameSpace:
+		if st.Focus == FocusMain && st.View == ViewProjectCycles {
+			a.toggleSelectedCycle()
+		}
 		return
 	case "S":
 		if is := a.currentIssue(); is != nil {
@@ -489,13 +624,29 @@ func (a *App) handleKey(ke key.Event) {
 		}
 		return
 	case "T":
+		if ke.Modifiers == key.ModCtrl {
+			if st.Modal == ModalTeam {
+				a.closeModal()
+			} else {
+				a.openTeam()
+			}
+			return
+		}
 		if st.ActiveFilter == "My Unlabeled Issues" {
 			issues := append([]linear.Issue(nil), st.Issues...)
 			go AutoLabel(st, issues)
+		} else {
+			st.ShowLabels = !st.ShowLabels
+			a.saveState()
+		}
+		return
+	case "Y":
+		if st.Focus == FocusMain && st.View == ViewProjectCycles {
+			a.copySelectedCycleIssues()
 		}
 		return
 	case "Q":
-		a.W.Perform(7) // app.Close-like — fall back to closing on Q.
+		a.W.Perform(system.ActionClose)
 		return
 	case "/":
 		// Focus the issue query editor; routed via clicking it.
@@ -524,9 +675,11 @@ func (a *App) updateHints() {
 	case FocusSidebar:
 		st.HintsText = "j/k: navigate  •  enter/l: select  •  c: create  •  ctrl+k: search  •  tab: issues  •  ?: help"
 	case FocusMain:
-		hints := "j/k: navigate  •  enter: browser  •  l: open  •  e: edit  •  s: status  •  c: create  •  v: compact  •  r: refresh  •  ?: help"
-		if st.ActiveFilter == "My Unlabeled Issues" {
-			hints = "t: auto-label  •  " + hints
+		hints := "j/k: navigate  •  enter: browser  •  l: open  •  e: edit  •  s: status  •  c: create  •  v: compact  •  t: tags  •  r: refresh  •  ?: help"
+		if st.View == ViewProjectCycles {
+			hints = "j/k: navigate  •  space/enter: expand  •  y: copy issues  •  r: refresh  •  ?: help"
+		} else if st.ActiveFilter == "My Unlabeled Issues" {
+			hints = "t: auto-label  •  j/k: navigate  •  enter: browser  •  l: open  •  e: edit  •  s: status  •  c: create  •  v: compact  •  r: refresh  •  ?: help"
 		}
 		st.HintsText = hints
 	}
@@ -638,6 +791,26 @@ func (a *App) moveIssue(d int) {
 		a.updateHints()
 	}
 }
+func (a *App) toggleSelectedCycle() {
+	st := a.State
+	if st.Selected < 0 || st.Selected >= len(st.ProjectCycles) {
+		return
+	}
+	id := st.ProjectCycles[st.Selected].Cycle.ID
+	if st.ExpandedCycles == nil {
+		st.ExpandedCycles = make(map[string]bool)
+	}
+	st.ExpandedCycles[id] = !st.ExpandedCycles[id]
+}
+
+func (a *App) copySelectedCycleIssues() {
+	st := a.State
+	if st.Selected < 0 || st.Selected >= len(st.ProjectCycles) {
+		return
+	}
+	go CopyCycleIssues(st, st.ProjectCycles[st.Selected])
+}
+
 func (a *App) currentIssue() *linear.Issue {
 	if a.State.View == ViewIssueDetail && a.State.Detail != nil {
 		return a.State.Detail
@@ -734,6 +907,16 @@ func (a *App) openSearch() {
 	a.updateHints()
 }
 
+func (a *App) openTeam() {
+	st := a.State
+	st.Modal = ModalTeam
+	st.ModalState = NewTeamModal()
+	if m, ok := st.ModalState.(*TeamModal); ok {
+		m.SetTeams(st.Teams)
+	}
+	a.updateHints()
+}
+
 func (a *App) closeModal() {
 	a.State.Modal = ModalNone
 	a.State.ModalState = nil
@@ -751,6 +934,14 @@ func indexOf(xs []string, s string) int {
 }
 
 // --- Helpers used by panel files ---
+
+var bracketRegex = regexp.MustCompile(`\[.*?\]`)
+
+// cleanProjectName removes anything between '[' and ']' inclusive.
+func cleanProjectName(s string) string {
+	s = bracketRegex.ReplaceAllString(s, "")
+	return strings.TrimSpace(s)
+}
 
 // truncate returns s truncated to n runes with an ellipsis if needed.
 func truncate(s string, n int) string {

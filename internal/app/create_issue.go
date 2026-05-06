@@ -1,7 +1,9 @@
 package app
 
 import (
+	"fmt"
 	"image"
+	"log"
 
 	"gioui.org/io/key"
 	"gioui.org/layout"
@@ -9,8 +11,16 @@ import (
 	"gioui.org/op/clip"
 	"gioui.org/unit"
 	"gioui.org/widget"
+	"gioui.org/widget/material"
 
 	"github.com/denislee/wllinear/internal/ui"
+)
+
+// Two-column table geometry for the create issue form.
+const (
+	formLabelColDp = 96
+	formColGapDp   = 8
+	formRowGapDp   = 14
 )
 
 func (a *App) layoutCreateIssue(gtx layout.Context) layout.Dimensions {
@@ -34,7 +44,6 @@ func (a *App) layoutCreateIssue(gtx layout.Context) layout.Dimensions {
 		} else if m.FocusIdx == 1 {
 			gtx.Execute(key.FocusCmd{Tag: &m.Description})
 		} else {
-			// Clear focus from editors if we navigate to priority, status, etc.
 			gtx.Execute(key.FocusCmd{Tag: nil})
 		}
 	}
@@ -45,72 +54,72 @@ func (a *App) layoutCreateIssue(gtx layout.Context) layout.Dimensions {
 		m.FocusIdx = 1
 	}
 
+	items := []layout.Widget{
+		// Header
+		func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					l := th.LabelColor(fs, unit.Sp(20), th.AccentDim, "Create Issue")
+					l.Font.Weight = 700
+					return l.Layout(gtx)
+				}),
+				layout.Rigid(rigidSpace(8)),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					h := gtx.Dp(unit.Dp(1))
+					rect(gtx, image.Rect(0, 0, gtx.Constraints.Max.X, h), th.Border)
+					return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, h)}
+				}),
+			)
+		},
+		rigidSpace(formRowGapDp),
+
+		// Title row
+		formRow(th, fs, "Title", m.FocusIdx == 0, func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X = gtx.Constraints.Max.X
+			gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(36))
+			gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(36))
+			ed := editorStyle(th, &m.Title, "Issue title", th.Text, fs)
+			if m.FocusIdx == 0 {
+				ed.Color = th.Accent
+			}
+			return widgetBox(gtx, th, ed.Layout)
+		}),
+		rigidSpace(formRowGapDp),
+
+		// Description row
+		formRow(th, fs, "Description", m.FocusIdx == 1, func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X = gtx.Constraints.Max.X
+			gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(160))
+			gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(160))
+			ed := editorStyle(th, &m.Description, "Description (optional)", th.Text, fs)
+			if m.FocusIdx == 1 {
+				ed.Color = th.Accent
+			}
+			return widgetBox(gtx, th, ed.Layout)
+		}),
+		rigidSpace(formRowGapDp),
+
+		// Selectors
+		a.layoutFormPriorityRow(m),
+		rigidSpace(formRowGapDp),
+		a.layoutFormStatusRow(m),
+		rigidSpace(formRowGapDp),
+		a.layoutFormProjectRow(m),
+		rigidSpace(formRowGapDp),
+		a.layoutFormCycleRow(m),
+		rigidSpace(formRowGapDp),
+
+		// Actions
+		func(gtx layout.Context) layout.Dimensions {
+			return a.modalButtons(nil, &m.Submit, "Cancel", "Create Issue", a.confirmCreateScreen, m.FocusIdx == 6)(gtx)
+		},
+	}
+
 	return layout.UniformInset(unit.Dp(20)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			// Header
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				l := th.LabelColor(fs, unit.Sp(20), th.AccentDim, "Create Issue")
-				l.Font.Weight = 700
-				return l.Layout(gtx)
-			}),
-			layout.Rigid(rigidSpace(8)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				h := gtx.Dp(unit.Dp(1))
-				rect(gtx, image.Rect(0, 0, gtx.Constraints.Max.X, h), th.Border)
-				return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, h)}
-			}),
-			layout.Rigid(rigidSpace(20)),
-
-			// Title
-			layout.Rigid(formLabel(th, fs, "Title:", m.FocusIdx == 0)),
-			layout.Rigid(rigidSpace(4)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				ed := editorStyle(th, &m.Title, "Issue title", th.Text, fs)
-				gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(36))
-				gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(36))
-				if m.FocusIdx == 0 {
-					ed.Color = th.Accent
-				}
-				return widgetBox(gtx, th, ed.Layout)
-			}),
-			layout.Rigid(rigidSpace(16)),
-
-			// Description (fixed height)
-			layout.Rigid(formLabel(th, fs, "Description:", m.FocusIdx == 1)),
-			layout.Rigid(rigidSpace(4)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				ed := editorStyle(th, &m.Description, "Description (optional)", th.Text, fs)
-				gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(160))
-				gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(160))
-				if m.FocusIdx == 1 {
-					ed.Color = th.Accent
-				}
-				return widgetBox(gtx, th, ed.Layout)
-			}),
-			layout.Rigid(rigidSpace(20)),
-
-			// Priority row
-			layout.Rigid(a.layoutFormPriorityRow(m)),
-			layout.Rigid(rigidSpace(16)),
-
-			// Status row
-			layout.Rigid(a.layoutFormStatusRow(m)),
-			layout.Rigid(rigidSpace(16)),
-
-			// Project row
-			layout.Rigid(a.layoutFormProjectRow(m)),
-			layout.Rigid(rigidSpace(16)),
-
-			// Cycle row
-			layout.Rigid(a.layoutFormCycleRow(m)),
-			layout.Rigid(rigidSpace(24)),
-
-			// Actions
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				// Indicate focus for Submit button if FocusIdx == 6 by drawing a slight indicator or just relying on label color.
-				return a.modalButtons(nil, &m.Submit, "Cancel", "Create Issue", a.confirmCreateScreen, m.FocusIdx == 6)(gtx)
-			}),
-		)
+		gtx.Constraints.Min.X = gtx.Constraints.Max.X
+		return material.List(th.M, &a.createList).Layout(gtx, len(items), func(gtx layout.Context, i int) layout.Dimensions {
+			return items[i](gtx)
+		})
 	})
 }
 
@@ -126,37 +135,51 @@ func formLabel(th *ui.Theme, fs ui.FontStyle, s string, focused bool) layout.Wid
 	}
 }
 
+// formRow lays out a two-column form row: a fixed-width label on the left and
+// the value content flexed on the right. The label is top-aligned with a small
+// inset so it sits on the first line of multi-line values (description editor).
+func formRow(th *ui.Theme, fs ui.FontStyle, label string, focused bool, value layout.Widget) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints.Min.X = gtx.Constraints.Max.X
+		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min.X = gtx.Dp(unit.Dp(formLabelColDp))
+				gtx.Constraints.Max.X = gtx.Dp(unit.Dp(formLabelColDp))
+				return layout.Inset{Top: unit.Dp(10)}.Layout(gtx, formLabel(th, fs, label, focused))
+			}),
+			layout.Rigid(hSpace(formColGapDp)),
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min.X = gtx.Constraints.Max.X
+				return value(gtx)
+			}),
+		)
+	}
+}
+
 func (a *App) layoutFormPriorityRow(m *CreateModal) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		th := a.Th
 		fs := th.Fonts.IssueDetail
 		labels := []string{"None", "Urgent", "High", "Medium", "Low"}
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				gtx.Constraints.Min.X = gtx.Dp(unit.Dp(96))
-				return formLabel(th, fs, "Priority:", m.FocusIdx == 2)(gtx)
-			}),
-			layout.Rigid(rigidSpace(8)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				children := make([]layout.FlexChild, 0, 10)
-				for i := 0; i < 5; i++ {
-					i := i
-					click := &m.PrioClicks[i]
-					if click.Clicked(gtx) {
-						m.Priority = i
-						m.FocusIdx = 2
-					}
-					sel := m.Priority == i
-					children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return chipBox(gtx, th, click, sel, func(gtx layout.Context) layout.Dimensions {
-							return th.LabelColor(fs, unit.Sp(11), th.Text, labels[i]).Layout(gtx)
-						})
-					}))
-					children = append(children, layout.Rigid(hSpace(6)))
+		return formRow(th, fs, "Priority", m.FocusIdx == 2, func(gtx layout.Context) layout.Dimensions {
+			children := make([]layout.FlexChild, 0, 10)
+			for i := 0; i < 5; i++ {
+				i := i
+				click := &m.PrioClicks[i]
+				if click.Clicked(gtx) {
+					m.Priority = i
+					m.FocusIdx = 2
 				}
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
-			}),
-		)
+				sel := m.Priority == i
+				children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return chipBox(gtx, th, click, sel, func(gtx layout.Context) layout.Dimensions {
+						return th.LabelColor(fs, unit.Sp(11), th.Text, labels[i]).Layout(gtx)
+					})
+				}))
+				children = append(children, layout.Rigid(hSpace(6)))
+			}
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+		})(gtx)
 	}
 }
 
@@ -164,92 +187,92 @@ func (a *App) layoutFormStatusRow(m *CreateModal) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		th := a.Th
 		fs := th.Fonts.IssueDetail
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				gtx.Constraints.Min.X = gtx.Dp(unit.Dp(96))
-				return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, formLabel(th, fs, "Status:", m.FocusIdx == 3))
-			}),
-			layout.Rigid(rigidSpace(8)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if m.Meta == nil {
-					return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return drawDimText(gtx, th, fs, "[ Default ]")
-					})
-				}
-				if len(m.Meta.States) == 0 {
-					return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return drawDimText(gtx, th, fs, "No states available")
-					})
-				}
 
-				if m.StatusToggle.Clicked(gtx) {
-					m.StatusExpanded = !m.StatusExpanded
-					m.FocusIdx = 3
-				}
+		if m.Meta == nil || len(m.Meta.States) == 0 {
+			return formRow(th, fs, "Status", false, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return drawDimText(gtx, th, fs, "[ Default ]")
+				})
+			})(gtx)
+		}
 
+		if m.StatusToggle.Clicked(gtx) {
+			log.Printf("[UI] Status toggle clicked! New state: expanded=%v", !m.StatusExpanded)
+			m.StatusExpanded = !m.StatusExpanded
+			m.FocusIdx = 3
+		}
+
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(formRow(th, fs, "Status", m.FocusIdx == 3, func(gtx layout.Context) layout.Dimensions {
 				selectedName := "Select Status ▾"
+				stateType := ""
 				if m.StateIdx >= 0 && m.StateIdx < len(m.Meta.States) {
-					selectedName = m.Meta.States[m.StateIdx].Name + " ▾"
+					st := m.Meta.States[m.StateIdx]
+					selectedName = st.Name + " ▾"
+					stateType = st.Type
 					if m.StatusExpanded {
-						selectedName = m.Meta.States[m.StateIdx].Name + " ▴"
+						selectedName = st.Name + " ▴"
 					}
-				} else if m.StatusExpanded {
-					selectedName = "Select Status ▴"
 				}
 
-				toggleBtn := func(gtx layout.Context) layout.Dimensions {
-					return chipBox(gtx, th, &m.StatusToggle, m.FocusIdx == 3, func(gtx layout.Context) layout.Dimensions {
-						return th.LabelColor(fs, unit.Sp(11), th.Text, selectedName).Layout(gtx)
-					})
-				}
-
+				return chipBox(gtx, th, &m.StatusToggle, m.FocusIdx == 3, func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = gtx.Constraints.Max.X
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if stateType == "" {
+								return layout.Dimensions{}
+							}
+							return statusDot(th, stateType)(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if stateType == "" {
+								return layout.Dimensions{}
+							}
+							return hSpace(6)(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return th.LabelColor(fs, unit.Sp(11), th.Text, selectedName).Layout(gtx)
+						}),
+					)
+				})
+			})),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				if !m.StatusExpanded {
-					return toggleBtn(gtx)
+					return layout.Dimensions{}
 				}
+				return formRowExpanded(func(gtx layout.Context) layout.Dimensions {
+					children := make([]layout.FlexChild, 0, len(m.Meta.States))
+					for i := range m.Meta.States {
+						i := i
+						if i >= len(m.StateClicks) {
+							break
+						}
+						click := &m.StateClicks[i]
+						if click.Clicked(gtx) {
+							log.Printf("[UI] Status chip %d clicked", i)
+							m.StateIdx = i
+							m.StatusExpanded = false
+						}
+						sel := m.StateIdx == i
+						st := m.Meta.States[i]
 
-				children := make([]layout.FlexChild, 0, len(m.Meta.States)+1)
-				children = append(children, layout.Rigid(toggleBtn))
-				children = append(children, layout.Rigid(rigidSpace(4)))
-
-				// Wrap chips horizontally
-				var currentRow []layout.FlexChild
-				for i := range m.Meta.States {
-					i := i
-					if i >= len(m.StateClicks) {
-						break
-					}
-					click := &m.StateClicks[i]
-					if click.Clicked(gtx) {
-						m.StateIdx = i
-						m.StatusExpanded = false
-						m.FocusIdx = 3
-					}
-					sel := m.StateIdx == i
-					stateType := m.Meta.States[i].Type
-					name := m.Meta.States[i].Name
-
-					chip := func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Right: unit.Dp(6), Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return chipBox(gtx, th, click, sel, func(gtx layout.Context) layout.Dimensions {
-								return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-									layout.Rigid(statusDot(th, stateType)),
-									layout.Rigid(hSpace(6)),
-									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										return th.LabelColor(fs, unit.Sp(11), th.Text, name).Layout(gtx)
-									}),
-								)
+						children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return chipBox(gtx, th, click, sel, func(gtx layout.Context) layout.Dimensions {
+									gtx.Constraints.Min.X = gtx.Constraints.Max.X
+									return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+										layout.Rigid(statusDot(th, st.Type)),
+										layout.Rigid(hSpace(6)),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return th.LabelColor(fs, unit.Sp(11), th.Text, st.Name).Layout(gtx)
+										}),
+									)
+								})
 							})
-						})
+						}))
 					}
-					currentRow = append(currentRow, layout.Rigid(chip))
-				}
-				// Since Gioui doesn't have a simple wrap layout, we'll just stack them vertically to be safe, 
-				// or horizontally if there are few. For dropdown, vertical is normal.
-				for _, c := range currentRow {
-					children = append(children, c)
-				}
-
-				return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, children...)
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+				})(gtx)
 			}),
 		)
 	}
@@ -259,82 +282,69 @@ func (a *App) layoutFormProjectRow(m *CreateModal) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		th := a.Th
 		fs := th.Fonts.IssueDetail
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				gtx.Constraints.Min.X = gtx.Dp(unit.Dp(96))
-				return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, formLabel(th, fs, "Project:", m.FocusIdx == 4))
-			}),
-			layout.Rigid(rigidSpace(8)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if a.State.LeadingProjects == nil {
-					return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return drawDimText(gtx, th, fs, "[ None ]")
-					})
-				}
-				if len(a.State.LeadingProjects) == 0 {
-					return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return drawDimText(gtx, th, fs, "No projects")
-					})
-				}
 
-				if m.ProjectToggle.Clicked(gtx) {
-					m.ProjectExpanded = !m.ProjectExpanded
-					m.FocusIdx = 4
-				}
+		if a.State.LeadingProjects == nil || len(a.State.LeadingProjects) == 0 {
+			return formRow(th, fs, "Project", false, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return drawDimText(gtx, th, fs, "[ None ]")
+				})
+			})(gtx)
+		}
 
+		if m.ProjectToggle.Clicked(gtx) {
+			log.Printf("[UI] Project toggle clicked! New state: expanded=%v", !m.ProjectExpanded)
+			m.ProjectExpanded = !m.ProjectExpanded
+			m.FocusIdx = 4
+		}
+
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(formRow(th, fs, "Project", m.FocusIdx == 4, func(gtx layout.Context) layout.Dimensions {
 				selectedName := "Select Project ▾"
 				if m.ProjectIdx >= 0 && m.ProjectIdx < len(a.State.LeadingProjects) {
-					selectedName = truncate(a.State.LeadingProjects[m.ProjectIdx].Name, 24) + " ▾"
+					p := a.State.LeadingProjects[m.ProjectIdx]
+					pName := cleanProjectName(p.Name)
+					selectedName = pName + " ▾"
 					if m.ProjectExpanded {
-						selectedName = truncate(a.State.LeadingProjects[m.ProjectIdx].Name, 24) + " ▴"
+						selectedName = pName + " ▴"
 					}
-				} else if m.ProjectExpanded {
-					selectedName = "Select Project ▴"
 				}
 
-				toggleBtn := func(gtx layout.Context) layout.Dimensions {
-					return chipBox(gtx, th, &m.ProjectToggle, m.FocusIdx == 4, func(gtx layout.Context) layout.Dimensions {
-						return th.LabelColor(fs, unit.Sp(11), th.Text, selectedName).Layout(gtx)
-					})
-				}
-
+				return chipBox(gtx, th, &m.ProjectToggle, m.FocusIdx == 4, func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = gtx.Constraints.Max.X
+					return th.LabelColor(fs, unit.Sp(11), th.Text, selectedName).Layout(gtx)
+				})
+			})),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				if !m.ProjectExpanded {
-					return toggleBtn(gtx)
+					return layout.Dimensions{}
 				}
-
-				children := make([]layout.FlexChild, 0, len(a.State.LeadingProjects)+2)
-				children = append(children, layout.Rigid(toggleBtn))
-				children = append(children, layout.Rigid(rigidSpace(4)))
-
-				for i := range a.State.LeadingProjects {
-					i := i
-					if i >= len(m.ProjectClicks) {
-						break
-					}
-					click := &m.ProjectClicks[i]
-					if click.Clicked(gtx) {
-						if m.ProjectIdx == i {
-							m.ProjectIdx = -1
-						} else {
-							m.ProjectIdx = i
+				return formRowExpanded(func(gtx layout.Context) layout.Dimensions {
+					children := make([]layout.FlexChild, 0, len(a.State.LeadingProjects))
+					for i := range a.State.LeadingProjects {
+						i := i
+						if i >= len(m.ProjectClicks) {
+							break
 						}
-						m.ProjectExpanded = false
-						m.FocusIdx = 4
-					}
-					sel := m.ProjectIdx == i
-					name := truncate(a.State.LeadingProjects[i].Name, 24)
-					
-					chip := func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return chipBox(gtx, th, click, sel, func(gtx layout.Context) layout.Dimensions {
-								return th.LabelColor(fs, unit.Sp(11), th.Text, name).Layout(gtx)
-							})
-						})
-					}
-					children = append(children, layout.Rigid(chip))
-				}
+						click := &m.ProjectClicks[i]
+						if click.Clicked(gtx) {
+							log.Printf("[UI] Project chip %d clicked", i)
+							m.ProjectIdx = i
+							m.ProjectExpanded = false
+						}
+						sel := m.ProjectIdx == i
+						p := a.State.LeadingProjects[i]
 
-				return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, children...)
+						children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return chipBox(gtx, th, click, sel, func(gtx layout.Context) layout.Dimensions {
+									gtx.Constraints.Min.X = gtx.Constraints.Max.X
+									return th.LabelColor(fs, unit.Sp(11), th.Text, cleanProjectName(p.Name)).Layout(gtx)
+								})
+							})
+						}))
+					}
+					return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, children...)
+				})(gtx)
 			}),
 		)
 	}
@@ -344,79 +354,89 @@ func (a *App) layoutFormCycleRow(m *CreateModal) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		th := a.Th
 		fs := th.Fonts.IssueDetail
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				gtx.Constraints.Min.X = gtx.Dp(unit.Dp(96))
-				return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, formLabel(th, fs, "Cycle:", m.FocusIdx == 5))
-			}),
-			layout.Rigid(rigidSpace(8)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if m.Meta == nil || len(m.Meta.Cycles) == 0 {
-					return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return drawDimText(gtx, th, fs, "[ None ]")
-					})
-				}
 
-				if m.CycleToggle.Clicked(gtx) {
-					m.CycleExpanded = !m.CycleExpanded
-					m.FocusIdx = 5
-				}
+		if m.Meta == nil || len(m.Meta.Cycles) == 0 {
+			return formRow(th, fs, "Cycle", false, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return drawDimText(gtx, th, fs, "[ None ]")
+				})
+			})(gtx)
+		}
 
+		if m.CycleToggle.Clicked(gtx) {
+			log.Printf("[UI] Cycle toggle clicked! New state: expanded=%v", !m.CycleExpanded)
+			m.CycleExpanded = !m.CycleExpanded
+			m.FocusIdx = 5
+		}
+
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(formRow(th, fs, "Cycle", m.FocusIdx == 5, func(gtx layout.Context) layout.Dimensions {
 				selectedName := "Select Cycle ▾"
 				if m.CycleIdx >= 0 && m.CycleIdx < len(m.Meta.Cycles) {
-					selectedName = truncate(m.Meta.Cycles[m.CycleIdx].Name, 24) + " ▾"
+					c := m.Meta.Cycles[m.CycleIdx]
+					name := c.Name
+					if name == "" {
+						name = fmt.Sprintf("Cycle %d", c.Number)
+					}
+					selectedName = truncate(name, 24) + " ▾"
 					if m.CycleExpanded {
-						selectedName = truncate(m.Meta.Cycles[m.CycleIdx].Name, 24) + " ▴"
+						selectedName = truncate(name, 24) + " ▴"
 					}
-				} else if m.CycleExpanded {
-					selectedName = "Select Cycle ▴"
 				}
 
-				toggleBtn := func(gtx layout.Context) layout.Dimensions {
-					return chipBox(gtx, th, &m.CycleToggle, m.FocusIdx == 5, func(gtx layout.Context) layout.Dimensions {
-						return th.LabelColor(fs, unit.Sp(11), th.Text, selectedName).Layout(gtx)
-					})
-				}
-
+				return chipBox(gtx, th, &m.CycleToggle, m.FocusIdx == 5, func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = gtx.Constraints.Max.X
+					return th.LabelColor(fs, unit.Sp(11), th.Text, selectedName).Layout(gtx)
+				})
+			})),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				if !m.CycleExpanded {
-					return toggleBtn(gtx)
+					return layout.Dimensions{}
 				}
-
-				children := make([]layout.FlexChild, 0, len(m.Meta.Cycles)+2)
-				children = append(children, layout.Rigid(toggleBtn))
-				children = append(children, layout.Rigid(rigidSpace(4)))
-
-				for i := range m.Meta.Cycles {
-					i := i
-					if i >= len(m.CycleClicks) {
-						break
-					}
-					click := &m.CycleClicks[i]
-					if click.Clicked(gtx) {
-						if m.CycleIdx == i {
-							m.CycleIdx = -1
-						} else {
-							m.CycleIdx = i
+				return formRowExpanded(func(gtx layout.Context) layout.Dimensions {
+					children := make([]layout.FlexChild, 0, len(m.Meta.Cycles))
+					for i := range m.Meta.Cycles {
+						i := i
+						if i >= len(m.CycleClicks) {
+							break
 						}
-						m.CycleExpanded = false
-						m.FocusIdx = 5
-					}
-					sel := m.CycleIdx == i
-					name := truncate(m.Meta.Cycles[i].Name, 24)
-					
-					chip := func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return chipBox(gtx, th, click, sel, func(gtx layout.Context) layout.Dimensions {
-								return th.LabelColor(fs, unit.Sp(11), th.Text, name).Layout(gtx)
-							})
-						})
-					}
-					children = append(children, layout.Rigid(chip))
-				}
+						click := &m.CycleClicks[i]
+						if click.Clicked(gtx) {
+							log.Printf("[UI] Cycle chip %d clicked", i)
+							m.CycleIdx = i
+							m.CycleExpanded = false
+						}
+						sel := m.CycleIdx == i
+						c := m.Meta.Cycles[i]
+						name := c.Name
+						if name == "" {
+							name = fmt.Sprintf("Cycle %d", c.Number)
+						}
 
-				return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, children...)
+						children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return chipBox(gtx, th, click, sel, func(gtx layout.Context) layout.Dimensions {
+									gtx.Constraints.Min.X = gtx.Constraints.Max.X
+									return th.LabelColor(fs, unit.Sp(11), th.Text, name).Layout(gtx)
+								})
+							})
+						}))
+					}
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+				})(gtx)
 			}),
 		)
+	}
+}
+
+// formRowExpanded renders an expanded list (e.g. dropdown options) indented
+// to align under the value column of formRow.
+func formRowExpanded(content layout.Widget) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{
+			Top:  unit.Dp(6),
+			Left: unit.Dp(formLabelColDp + formColGapDp),
+		}.Layout(gtx, content)
 	}
 }
 

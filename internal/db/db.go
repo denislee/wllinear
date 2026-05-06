@@ -39,6 +39,14 @@ func Open(path string) (*DB, error) {
 			PRIMARY KEY (team_id, filter_name, issue_id)
 		);
 		CREATE INDEX IF NOT EXISTS idx_issues_cache_lookup ON issues_cache (team_id, filter_name, pos);
+		CREATE TABLE IF NOT EXISTS project_cycles_cache (
+			project_id TEXT,
+			cycle_id TEXT,
+			data BLOB,
+			pos INTEGER,
+			PRIMARY KEY (project_id, cycle_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_project_cycles_lookup ON project_cycles_cache (project_id, pos);
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("init schema: %w", err)
@@ -109,6 +117,68 @@ func (d *DB) SaveIssues(teamID, filterName string, issues []linear.Issue) error 
 			return err
 		}
 		_, err = stmt.Exec(teamID, filterName, is.ID, data, i)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetProjectCycles retrieves cached cycles (with their completed issues) for a project.
+func (d *DB) GetProjectCycles(projectID string) ([]linear.ProjectCycleIssues, error) {
+	if d == nil {
+		return nil, nil
+	}
+	rows, err := d.conn.Query("SELECT data FROM project_cycles_cache WHERE project_id = ? ORDER BY pos", projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var cycles []linear.ProjectCycleIssues
+	for rows.Next() {
+		var data []byte
+		if err := rows.Scan(&data); err != nil {
+			return nil, err
+		}
+		var c linear.ProjectCycleIssues
+		if err := json.Unmarshal(data, &c); err != nil {
+			return nil, err
+		}
+		cycles = append(cycles, c)
+	}
+	return cycles, nil
+}
+
+// SaveProjectCycles overwrites the cached cycles for a project.
+func (d *DB) SaveProjectCycles(projectID string, cycles []linear.ProjectCycleIssues) error {
+	if d == nil {
+		return nil
+	}
+	tx, err := d.conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec("DELETE FROM project_cycles_cache WHERE project_id = ?", projectID)
+	if err != nil {
+		return err
+	}
+
+	stmt, err := tx.Prepare("INSERT INTO project_cycles_cache (project_id, cycle_id, data, pos) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for i, c := range cycles {
+		data, err := json.Marshal(c)
+		if err != nil {
+			return err
+		}
+		_, err = stmt.Exec(projectID, c.Cycle.ID, data, i)
 		if err != nil {
 			return err
 		}

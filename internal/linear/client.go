@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -29,17 +30,39 @@ func NewClient(token string) *Client {
 	return &Client{token: token}
 }
 
+func extractOperationName(query string) string {
+	q := strings.TrimSpace(query)
+	// Simple heuristic: find the first word after {
+	if idx := strings.Index(q, "{"); idx != -1 {
+		q = strings.TrimSpace(q[idx+1:])
+		parts := strings.Fields(q)
+		if len(parts) > 0 {
+			return strings.Split(parts[0], "(")[0]
+		}
+	}
+	return "unknown"
+}
+
 func (c *Client) execute(query string, vars map[string]any, resp any) error {
+	opName := extractOperationName(query)
+	log.Printf("[Linear API] Executing query: %s", opName)
+	if len(vars) > 0 {
+		varsJSON, _ := json.Marshal(vars)
+		log.Printf("[Linear API] Variables: %s", string(varsJSON))
+	}
+
 	body, err := json.Marshal(map[string]any{
 		"query":     query,
 		"variables": vars,
 	})
 	if err != nil {
+		log.Printf("[Linear API] Error marshaling request: %v", err)
 		return err
 	}
 
 	req, err := http.NewRequest("POST", apiURL, bytes.NewReader(body))
 	if err != nil {
+		log.Printf("[Linear API] Error creating request: %v", err)
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -49,14 +72,19 @@ func (c *Client) execute(query string, vars map[string]any, resp any) error {
 	defer cancel()
 	req = req.WithContext(ctx)
 
+	start := time.Now()
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
+		log.Printf("[Linear API] HTTP Request failed: %v", err)
 		return err
 	}
 	defer r.Body.Close()
 
+	log.Printf("[Linear API] Received response %d in %v", r.StatusCode, time.Since(start))
+
 	if r.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(r.Body)
+		log.Printf("[Linear API] HTTP Error: %s", string(b))
 		return fmt.Errorf("linear api error (%d): %s", r.StatusCode, string(b))
 	}
 
@@ -67,9 +95,11 @@ func (c *Client) execute(query string, vars map[string]any, resp any) error {
 		} `json:"errors"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&wrapper); err != nil {
+		log.Printf("[Linear API] Error decoding response: %v", err)
 		return err
 	}
 	if len(wrapper.Errors) > 0 {
+		log.Printf("[Linear API] GraphQL Error: %s", wrapper.Errors[0].Message)
 		return fmt.Errorf("linear api error: %s", wrapper.Errors[0].Message)
 	}
 	return json.Unmarshal(wrapper.Data, resp)
@@ -118,9 +148,6 @@ func (c *Client) GetTeamMetadata(teamID string) (*TeamMetadata, error) {
 			Members struct {
 				Nodes []User `json:"nodes"`
 			} `json:"members"`
-			Cycles struct {
-				Nodes []Cycle `json:"nodes"`
-			} `json:"cycles"`
 			States struct {
 				Nodes []WorkflowState `json:"nodes"`
 			} `json:"states"`
@@ -138,10 +165,15 @@ func (c *Client) GetTeamMetadata(teamID string) (*TeamMetadata, error) {
 		return nil, err
 	}
 
+	cycles, err := c.getAllTeamCycles(teamID)
+	if err != nil {
+		return nil, err
+	}
+
 	return &TeamMetadata{
 		Members:  resp.Team.Members.Nodes,
 		Projects: projects,
-		Cycles:   resp.Team.Cycles.Nodes,
+		Cycles:   cycles,
 		States:   resp.Team.States.Nodes,
 		Labels:   resp.Team.Labels.Nodes,
 	}, nil
@@ -175,6 +207,38 @@ func (c *Client) getAllProjects() ([]Project, error) {
 	return all, nil
 }
 
+// getAllTeamCycles fetches all cycles for a team across all pages.
+func (c *Client) getAllTeamCycles(teamID string) ([]Cycle, error) {
+	var all []Cycle
+	var cursor *string
+	for {
+		vars := map[string]any{
+			"teamId": teamID,
+		}
+		if cursor != nil {
+			vars["after"] = *cursor
+		}
+		var resp struct {
+			Team struct {
+				Cycles struct {
+					Nodes    []Cycle  `json:"nodes"`
+					PageInfo PageInfo `json:"pageInfo"`
+				} `json:"cycles"`
+			} `json:"team"`
+		}
+		if err := c.execute(queryTeamCycles, vars, &resp); err != nil {
+			return nil, err
+		}
+		all = append(all, resp.Team.Cycles.Nodes...)
+		if !resp.Team.Cycles.PageInfo.HasNextPage {
+			break
+		}
+		cursor = &resp.Team.Cycles.PageInfo.EndCursor
+	}
+	log.Printf("[Linear API] Fetched %d cycles for team %s", len(all), teamID)
+	return all, nil
+}
+
 // GetLeadingProjects returns projects where the user is the lead and status is "Developing".
 func (c *Client) GetLeadingProjects(userID string) ([]Project, error) {
 	vars := map[string]any{
@@ -202,9 +266,12 @@ func (c *Client) GetProjectIssuesFromLastCycle(projectID string) ([]string, erro
 		return nil, nil
 	}
 	last := cycles[0]
-	titles := make([]string, len(last.Issues))
-	for i, iss := range last.Issues {
-		titles[i] = iss.Title
+	titles := make([]string, 0, len(last.Issues))
+	for _, iss := range last.Issues {
+		if !strings.EqualFold(iss.State.Name, "Done") {
+			continue
+		}
+		titles = append(titles, iss.Title)
 	}
 	return titles, nil
 }
@@ -425,8 +492,8 @@ func (c *Client) GetFilterCounts(teamID string, filters map[string]map[string]an
 			f = newFilter
 		}
 
-		// We fetch nodes to count them.
-		aliases = append(aliases, fmt.Sprintf("%s: issues(first: 1, filter: %s) { totalCount }", alias, varName))
+		// We fetch nodes to count them, up to 50.
+		aliases = append(aliases, fmt.Sprintf("%s: issues(first: 50, filter: %s) { nodes { id } }", alias, varName))
 		vars[fmt.Sprintf("filter%d", i)] = f
 		i++
 	}
@@ -435,7 +502,9 @@ func (c *Client) GetFilterCounts(teamID string, filters map[string]map[string]an
 
 	var respWrapper struct {
 		Team map[string]struct {
-			TotalCount int `json:"totalCount"`
+			Nodes []struct {
+				ID string `json:"id"`
+			} `json:"nodes"`
 		} `json:"team"`
 	}
 
@@ -445,7 +514,7 @@ func (c *Client) GetFilterCounts(teamID string, filters map[string]map[string]an
 
 	res := make(map[string]int)
 	for alias, val := range respWrapper.Team {
-		res[aliasToName[alias]] = val.TotalCount
+		res[aliasToName[alias]] = len(val.Nodes)
 	}
 	return res, nil
 }

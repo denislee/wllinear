@@ -32,6 +32,7 @@ const (
 	ModalEdit
 	ModalStatus
 	ModalSearch
+	ModalTeam
 	ModalHelp
 )
 
@@ -62,10 +63,15 @@ type State struct {
 	FilterCounts  map[string]int // filter name -> count
 	ActiveFilter  string
 
-	Issues        []linear.Issue
-	ProjectCycles []linear.ProjectCycleIssues
-	Selected      int    // index into Issues or ProjectCycles
+	Issues           []linear.Issue
+	ProjectCycles    []linear.ProjectCycleIssues
+	ExpandedCycles   map[string]bool // cycle ID -> expanded
+	CurrentProjectID string // project whose cycles are being viewed (guards stale loads)
+	Selected         int    // index into Issues or ProjectCycles
 	Compact       bool
+	ShowLabels    bool
+	ShowPriority  bool
+	SidebarWidth  int
 
 	View   View
 	Detail *linear.Issue

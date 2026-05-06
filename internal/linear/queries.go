@@ -104,16 +104,6 @@ const queryTeamMetadata = `query($teamId: String!) {
 				email
 			}
 		}
-		cycles(first: 100) {
-			nodes {
-				id
-				number
-				name
-				startsAt
-				endsAt
-				completedAt
-			}
-		}
 		states {
 			nodes {
 				id
@@ -128,6 +118,22 @@ const queryTeamMetadata = `query($teamId: String!) {
 				id
 				name
 				color
+			}
+		}
+	}
+}`
+
+const queryTeamCycles = `query($teamId: String!, $after: String) {
+	team(id: $teamId) {
+		cycles(first: 250, after: $after) {
+			pageInfo { hasNextPage endCursor }
+			nodes {
+				id
+				number
+				name
+				startsAt
+				endsAt
+				completedAt
 			}
 		}
 	}

@@ -52,11 +52,23 @@ func fetchLeadingProjects(s *State) {
 }
 
 func fetchProjectCycles(s *State, project linear.Project) {
+	// 1. Try loading from local cache for immediate display.
+	if cached, err := s.DB.GetProjectCycles(project.ID); err == nil && len(cached) > 0 {
+		post(s, ProjectCyclesLoaded{ProjectID: project.ID, Cycles: cached, FromCache: true})
+	}
+
+	// 2. Fetch from network in the background.
 	cycles, err := s.Client.GetProjectIssuesByCycles(project.ID)
 	if err != nil {
-		post(s, errStatus(err))
+		// Only surface error if we have nothing to show.
+		if len(s.ProjectCycles) == 0 {
+			post(s, errStatus(err))
+		}
 		return
 	}
+
+	// 3. Update cache and UI with fresh data.
+	_ = s.DB.SaveProjectCycles(project.ID, cycles)
 	post(s, ProjectCyclesLoaded{ProjectID: project.ID, Cycles: cycles})
 }
 
@@ -102,6 +114,9 @@ func fetchFilterCounts(s *State, teamID string, filters []string) {
 }
 
 func fetchTeamMetadata(s *State, teamID string) {
+	if s.Meta != nil && s.Team != nil && s.Team.ID == teamID {
+		return
+	}
 	meta, err := s.Client.GetTeamMetadata(teamID)
 	if err != nil {
 		post(s, errStatus(err))
@@ -179,6 +194,38 @@ func OpenBrowser(url string) {
 		return
 	}
 	_ = c.Start()
+}
+
+// CopyCycleIssues copies the titles of the given cycle's issues as a markdown list.
+// Only issues whose workflow state name is "Done" are included.
+func CopyCycleIssues(s *State, c linear.ProjectCycleIssues) {
+	name := c.Cycle.Name
+	if name == "" {
+		name = "Cycle " + intStr(c.Cycle.Number)
+	}
+	if len(c.Issues) == 0 {
+		post(s, StatusMsg{Text: "No issues in " + name, Kind: StatusWarn})
+		return
+	}
+	lines := make([]string, 0, len(c.Issues))
+	for _, is := range c.Issues {
+		if !strings.EqualFold(is.State.Name, "Done") {
+			continue
+		}
+		lines = append(lines, "- "+is.Title)
+	}
+	if len(lines) == 0 {
+		post(s, StatusMsg{Text: "No Done issues in " + name, Kind: StatusWarn})
+		return
+	}
+	if err := clipboard.WriteAll(strings.Join(lines, "\n")); err != nil {
+		post(s, errStatus(err))
+		return
+	}
+	post(s, StatusMsg{
+		Text: "Copied " + intStr(len(lines)) + " issue titles to clipboard",
+		Kind: StatusOk,
+	})
 }
 
 // CopyProjectLastCycle copies titles of last-cycle issues to the clipboard.

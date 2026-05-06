@@ -8,12 +8,16 @@ import (
 )
 
 type State struct {
-	LastTeamID  string    `json:"last_team_id"`
-	LastFilter  string    `json:"last_filter"`
-	CompactMode bool      `json:"compact_mode"`
-	WindowW     int       `json:"window_w,omitempty"`
-	WindowH     int       `json:"window_h,omitempty"`
-	Fonts       FontPrefs `json:"fonts,omitempty"`
+	LastTeamID              string    `json:"last_team_id"`
+	LastFilter              string    `json:"last_filter"`
+	CompactMode             bool      `json:"compact_mode"`
+	ShowLabels              bool      `json:"show_labels"`
+	ShowPriority            bool      `json:"show_priority"`
+	SidebarWidth            int       `json:"sidebar_width"`
+	WindowW                 int       `json:"window_w,omitempty"`
+	WindowH                 int       `json:"window_h,omitempty"`
+	Fonts                   FontPrefs `json:"fonts,omitempty"`
+	DefaultCreateStatusType string    `json:"default_create_status_type,omitempty"`
 }
 
 // FontPref is the persisted form of ui.FontStyle. Mirrored here so the
@@ -48,12 +52,21 @@ func DBPath() string {
 
 // LoadState reads persisted UI state from disk. Missing or corrupt → defaults.
 func LoadState() *State {
-	state := &State{}
+	state := &State{
+		CompactMode:  true,
+		ShowPriority: true,
+	}
 	if data, err := os.ReadFile(statePath()); err == nil {
 		_ = json.Unmarshal(data, state)
 	}
 	if state.LastFilter == "" {
 		state.LastFilter = "My Issues + Active"
+	}
+	if state.SidebarWidth == 0 {
+		state.SidebarWidth = 260
+	}
+	if state.DefaultCreateStatusType == "" {
+		state.DefaultCreateStatusType = "started"
 	}
 	return state
 }
