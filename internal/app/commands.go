@@ -147,6 +147,14 @@ func fetchMyIssues(s *State) {
 	if s.Team == nil || s.User == nil {
 		return
 	}
+
+	// 1. Try loading from local cache for immediate display.
+	const cacheKey = "__search_my_issues__"
+	if cached, err := s.DB.GetIssues(s.Team.ID, cacheKey); err == nil && len(cached) > 0 {
+		post(s, MyIssuesLoaded{Issues: cached})
+	}
+
+	// 2. Fetch from network in the background.
 	filter := map[string]any{
 		"assignee": map[string]any{"id": map[string]any{"eq": s.User.ID}},
 	}
@@ -155,6 +163,9 @@ func fetchMyIssues(s *State) {
 		post(s, errStatus(err))
 		return
 	}
+
+	// 3. Update cache and UI with fresh data.
+	_ = s.DB.SaveIssues(s.Team.ID, cacheKey, conn.Nodes)
 	post(s, MyIssuesLoaded{Issues: conn.Nodes})
 }
 

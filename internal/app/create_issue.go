@@ -29,7 +29,7 @@ func (a *App) layoutCreateIssue(gtx layout.Context) layout.Dimensions {
 		return layout.Dimensions{}
 	}
 	th := a.Th
-	fs := th.Fonts.IssueDetail
+	fs := th.Fonts.CreateIssue
 
 	if !m.FocusSet {
 		m.FocusSet = true
@@ -163,7 +163,7 @@ func formRow(th *ui.Theme, fs ui.FontStyle, label string, focused bool, value la
 func (a *App) layoutFormPriorityRow(m *CreateModal) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		th := a.Th
-		fs := th.Fonts.IssueDetail
+		fs := th.Fonts.CreateIssue
 		labels := []string{"None", "Urgent", "High", "Medium", "Low"}
 		return formRow(th, fs, "Priority", m.FocusIdx == 2, func(gtx layout.Context) layout.Dimensions {
 			children := make([]layout.FlexChild, 0, 10)
@@ -190,7 +190,7 @@ func (a *App) layoutFormPriorityRow(m *CreateModal) layout.Widget {
 func (a *App) layoutFormStatusRow(m *CreateModal) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		th := a.Th
-		fs := th.Fonts.IssueDetail
+		fs := th.Fonts.CreateIssue
 
 		if m.Meta == nil || len(m.Meta.States) == 0 {
 			return formRow(th, fs, "Status", false, func(gtx layout.Context) layout.Dimensions {
@@ -285,7 +285,7 @@ func (a *App) layoutFormStatusRow(m *CreateModal) layout.Widget {
 func (a *App) layoutFormAssigneeRow(m *CreateModal) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		th := a.Th
-		fs := th.Fonts.IssueDetail
+		fs := th.Fonts.CreateIssue
 
 		if m.Meta == nil || len(m.Meta.Members) == 0 {
 			return formRow(th, fs, "Assignee", false, func(gtx layout.Context) layout.Dimensions {
@@ -356,7 +356,7 @@ func (a *App) layoutFormAssigneeRow(m *CreateModal) layout.Widget {
 func (a *App) layoutFormProjectRow(m *CreateModal) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		th := a.Th
-		fs := th.Fonts.IssueDetail
+		fs := th.Fonts.CreateIssue
 
 		if a.State.LeadingProjects == nil || len(a.State.LeadingProjects) == 0 {
 			return formRow(th, fs, "Project", false, func(gtx layout.Context) layout.Dimensions {
@@ -428,7 +428,7 @@ func (a *App) layoutFormProjectRow(m *CreateModal) layout.Widget {
 func (a *App) layoutFormCycleRow(m *CreateModal) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		th := a.Th
-		fs := th.Fonts.IssueDetail
+		fs := th.Fonts.CreateIssue
 
 		if m.Meta == nil || len(m.Meta.Cycles) == 0 {
 			return formRow(th, fs, "Cycle", false, func(gtx layout.Context) layout.Dimensions {

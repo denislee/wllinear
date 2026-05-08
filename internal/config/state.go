@@ -19,6 +19,7 @@ type State struct {
 	WindowH                 int       `json:"window_h,omitempty"`
 	Fonts                   FontPrefs `json:"fonts,omitempty"`
 	DefaultCreateStatusType string    `json:"default_create_status_type,omitempty"`
+	EnableLogging           bool      `json:"enable_logging"`
 }
 
 // FontPref is the persisted form of ui.FontStyle. Mirrored here so the
@@ -34,6 +35,7 @@ type FontPrefs struct {
 	Sidebar     FontPref `json:"sidebar,omitempty"`
 	IssueList   FontPref `json:"issue_list,omitempty"`
 	IssueDetail FontPref `json:"issue_detail,omitempty"`
+	CreateIssue FontPref `json:"create_issue,omitempty"`
 	StatusBar   FontPref `json:"status_bar,omitempty"`
 	Modal       FontPref `json:"modal,omitempty"`
 	Code        FontPref `json:"code,omitempty"`
@@ -54,8 +56,9 @@ func DBPath() string {
 // LoadState reads persisted UI state from disk. Missing or corrupt → defaults.
 func LoadState() *State {
 	state := &State{
-		CompactMode:  true,
-		ShowPriority: true,
+		CompactMode:   true,
+		ShowPriority:  true,
+		EnableLogging: true,
 	}
 	if data, err := os.ReadFile(statePath()); err == nil {
 		_ = json.Unmarshal(data, state)

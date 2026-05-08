@@ -360,6 +360,7 @@ type SearchModal struct {
 	Selected int
 	Cancel   widget.Clickable
 	Clicks   []widget.Clickable
+	FocusSet bool
 }
 
 func NewSearchModal() *SearchModal {
@@ -383,6 +384,9 @@ type SettingsModal struct {
 	// Default-create-status cycler.
 	StatusPrev widget.Clickable
 	StatusNext widget.Clickable
+
+	LogToggle   widget.Bool
+	HintsToggle widget.Bool
 }
 
 // CreateStatusTypes are the workflow state types selectable as the default
@@ -413,14 +417,17 @@ type SettingsRow struct {
 	Reset   widget.Clickable
 }
 
-func NewSettingsModal(th *ui.Theme) *SettingsModal {
+func NewSettingsModal(th *ui.Theme, logging, hideHints bool) *SettingsModal {
 	m := &SettingsModal{}
+	m.LogToggle.Value = logging
+	m.HintsToggle.Value = !hideHints
 	m.List.Axis = layout.Vertical
 	m.Rows = []*SettingsRow{
 		{Label: "Global (base)", Target: &th.Fonts.Global},
 		{Label: "Sidebar", Target: &th.Fonts.Sidebar},
 		{Label: "Issue List", Target: &th.Fonts.IssueList},
 		{Label: "Issue Detail", Target: &th.Fonts.IssueDetail},
+		{Label: "Create Issue", Target: &th.Fonts.CreateIssue},
 		{Label: "Status Bar", Target: &th.Fonts.StatusBar},
 		{Label: "Modals", Target: &th.Fonts.Modal},
 		{Label: "Code (mono)", Target: &th.Fonts.Code, Mono: true},

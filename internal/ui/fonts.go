@@ -32,6 +32,7 @@ type SectionFonts struct {
 	Sidebar     FontStyle
 	IssueList   FontStyle
 	IssueDetail FontStyle
+	CreateIssue FontStyle
 	StatusBar   FontStyle
 	Modal       FontStyle
 	Code        FontStyle
@@ -108,6 +109,7 @@ func (t *Theme) ApplyFontPrefs(p SectionFonts) {
 	merge(&t.Fonts.Sidebar, p.Sidebar)
 	merge(&t.Fonts.IssueList, p.IssueList)
 	merge(&t.Fonts.IssueDetail, p.IssueDetail)
+	merge(&t.Fonts.CreateIssue, p.CreateIssue)
 	merge(&t.Fonts.StatusBar, p.StatusBar)
 	merge(&t.Fonts.Modal, p.Modal)
 	merge(&t.Fonts.Code, p.Code)

@@ -82,6 +82,7 @@ func (a *App) layoutHelpModal(gtx layout.Context) layout.Dimensions {
 	sections := []sec{
 		{"Global", []pair{
 			{"q / ctrl+c", "quit"},
+			{"ctrl+r", "refresh issues & projects"},
 			{"tab / shift+tab", "switch panel"},
 			{"c", "create issue"},
 			{"ctrl+k", "search issues"},
@@ -340,11 +341,16 @@ func (a *App) layoutSearchModal(gtx layout.Context) layout.Dimensions {
 	if !ok {
 		return layout.Dimensions{}
 	}
+	if !m.FocusSet {
+		m.FocusSet = true
+		gtx.Execute(key.FocusCmd{Tag: &m.Query})
+	}
 	return a.modalCard(gtx, gtx.Dp(unit.Dp(640)), gtx.Dp(unit.Dp(560)), func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(modalTitle(a.Th, "Search my issues")),
 			layout.Rigid(rigidSpace(8)),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min.X = gtx.Constraints.Max.X
 				ed := editorStyle(a.Th, &m.Query, "type to filter…", a.Th.Text, a.Th.Fonts.Modal)
 				return widgetBox(gtx, a.Th, ed.Layout)
 			}),
@@ -378,13 +384,6 @@ func (a *App) layoutSearchModal(gtx layout.Context) layout.Dimensions {
 					}))
 				}
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
-			}),
-			layout.Rigid(rigidSpace(8)),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if m.Cancel.Clicked(gtx) {
-					a.closeModal()
-				}
-				return material.Button(a.Th.M, &m.Cancel, "Close").Layout(gtx)
 			}),
 		)
 	})
@@ -571,6 +570,8 @@ func (a *App) layoutCreateModal(gtx layout.Context) layout.Dimensions {
 	if !ok {
 		return layout.Dimensions{}
 	}
+	th := a.Th
+	fs := th.Fonts.CreateIssue
 	// Increased size for a more organized, spacious layout.
 	return a.modalCard(gtx, gtx.Dp(unit.Dp(960)), gtx.Dp(unit.Dp(720)), func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -581,7 +582,7 @@ func (a *App) layoutCreateModal(gtx layout.Context) layout.Dimensions {
 					layout.Rigid(rigidSpace(12)),
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 						if a.State.Team != nil {
-							return a.Th.LabelColor(a.Th.Fonts.Modal, unit.Sp(12), a.Th.TextMuted, "in "+a.State.Team.Name).Layout(gtx)
+							return a.Th.LabelColor(fs, unit.Sp(12), a.Th.TextMuted, "in "+a.State.Team.Name).Layout(gtx)
 						}
 						return layout.Dimensions{}
 					}),
@@ -595,18 +596,18 @@ func (a *App) layoutCreateModal(gtx layout.Context) layout.Dimensions {
 					// Left Column: Title and Description
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-							layout.Rigid(fieldLabel(a.Th, a.Th.Fonts.Modal, "ISSUE TITLE")),
+							layout.Rigid(fieldLabel(a.Th, fs, "ISSUE TITLE")),
 							layout.Rigid(rigidSpace(4)),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								ed := editorStyle(a.Th, &m.Title, "What needs to be done?", a.Th.Text, a.Th.Fonts.Modal)
+								ed := editorStyle(a.Th, &m.Title, "What needs to be done?", a.Th.Text, fs)
 								gtx.Constraints.Min.Y = gtx.Dp(unit.Dp(36))
 								return widgetBox(gtx, a.Th, ed.Layout)
 							}),
 							layout.Rigid(rigidSpace(24)),
-							layout.Rigid(fieldLabel(a.Th, a.Th.Fonts.Modal, "DESCRIPTION")),
+							layout.Rigid(fieldLabel(a.Th, fs, "DESCRIPTION")),
 							layout.Rigid(rigidSpace(4)),
 							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-								ed := editorStyle(a.Th, &m.Description, "Add more details...", a.Th.Text, a.Th.Fonts.Modal)
+								ed := editorStyle(a.Th, &m.Description, "Add more details...", a.Th.Text, fs)
 								gtx.Constraints.Min.X = gtx.Constraints.Max.X
 								return widgetBox(gtx, a.Th, ed.Layout)
 							}),
@@ -621,7 +622,7 @@ func (a *App) layoutCreateModal(gtx layout.Context) layout.Dimensions {
 						gtx.Constraints.Max.X = gtx.Dp(unit.Dp(300))
 
 						if m.Meta == nil {
-							return drawDimText(gtx, a.Th, a.Th.Fonts.Modal, "Loading metadata…")
+							return drawDimText(gtx, a.Th, fs, "Loading metadata…")
 						}
 
 						// Use a scrollable list for properties
@@ -633,22 +634,22 @@ func (a *App) layoutCreateModal(gtx layout.Context) layout.Dimensions {
 								case 1:
 									gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(180))
 									gtx.Constraints.Min.Y = gtx.Constraints.Max.Y
-									return chooserColumn(gtx, a.Th, a.Th.Fonts.Modal, "STATUS",
+									return chooserColumn(gtx, a.Th, fs, "STATUS",
 										stateNames(m.Meta.States), m.StateClicks, &m.StateIdx)
 								case 2:
 									gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(180))
 									gtx.Constraints.Min.Y = gtx.Constraints.Max.Y
-									return chooserColumn(gtx, a.Th, a.Th.Fonts.Modal, "ASSIGNEE",
+									return chooserColumn(gtx, a.Th, fs, "ASSIGNEE",
 										userNames(m.Meta.Members), m.AssigneeClicks, &m.AssigneeIdx)
 								case 3:
 									gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(180))
 									gtx.Constraints.Min.Y = gtx.Constraints.Max.Y
-									return chooserColumn(gtx, a.Th, a.Th.Fonts.Modal, "PROJECT",
+									return chooserColumn(gtx, a.Th, fs, "PROJECT",
 										projectNames(a.State.LeadingProjects), m.ProjectClicks, &m.ProjectIdx)
 								case 4:
 									gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(180))
 									gtx.Constraints.Min.Y = gtx.Constraints.Max.Y
-									return chooserColumn(gtx, a.Th, a.Th.Fonts.Modal, "CYCLE",
+									return chooserColumn(gtx, a.Th, fs, "CYCLE",
 										cycleNames(m.Meta.Cycles), m.CycleClicks, &m.CycleIdx)
 								default:
 									return layout.Dimensions{}
@@ -1410,6 +1411,14 @@ func (a *App) layoutSettingsSide(gtx layout.Context, r image.Rectangle) {
 			}),
 			layout.Rigid(rigidSpace(8)),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.layoutLoggingRow(gtx, m)
+			}),
+			layout.Rigid(rigidSpace(8)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.layoutHintsRow(gtx, m)
+			}),
+			layout.Rigid(rigidSpace(8)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				h := gtx.Dp(unit.Dp(1))
 				rect(gtx, image.Rect(0, 0, gtx.Constraints.Max.X, h), a.Th.Border)
 				return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, h)}
@@ -1696,6 +1705,80 @@ func (a *App) layoutDefaultStatusRow(gtx layout.Context, m *SettingsModal) layou
 	})
 }
 
+// layoutLoggingRow renders a toggle for debug/info logs.
+func (a *App) layoutLoggingRow(gtx layout.Context, m *SettingsModal) layout.Dimensions {
+	return layout.Inset{Top: unit.Dp(4), Bottom: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						sz := gtx.Dp(unit.Dp(6))
+						rr := clip.UniformRRect(image.Rect(0, 0, sz, sz), sz/2)
+						paint.FillShape(gtx.Ops, a.Th.Border, rr.Op(gtx.Ops))
+						return layout.Dimensions{Size: image.Pt(sz, sz)}
+					}),
+					layout.Rigid(rigidSpace(8)),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						l := a.Th.LabelColor(a.Th.Fonts.Modal, unit.Sp(13), a.Th.Text, "Debug / Info Logs")
+						l.Font.Weight = 600
+						return l.Layout(gtx)
+					}),
+				)
+			}),
+			layout.Rigid(rigidSpace(8)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.surfaceRow(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return a.Th.LabelColor(a.Th.Fonts.Modal, unit.Sp(12), a.Th.TextDim, "Writes to stderr when enabled").Layout(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return material.CheckBox(a.Th.M, &m.LogToggle, "").Layout(gtx)
+						}),
+					)
+				})
+			}),
+		)
+	})
+}
+
+// layoutHintsRow renders a toggle for the bottom help/hints bar.
+func (a *App) layoutHintsRow(gtx layout.Context, m *SettingsModal) layout.Dimensions {
+	return layout.Inset{Top: unit.Dp(4), Bottom: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						sz := gtx.Dp(unit.Dp(6))
+						rr := clip.UniformRRect(image.Rect(0, 0, sz, sz), sz/2)
+						paint.FillShape(gtx.Ops, a.Th.Border, rr.Op(gtx.Ops))
+						return layout.Dimensions{Size: image.Pt(sz, sz)}
+					}),
+					layout.Rigid(rigidSpace(8)),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						l := a.Th.LabelColor(a.Th.Fonts.Modal, unit.Sp(13), a.Th.Text, "Bottom Help Bar")
+						l.Font.Weight = 600
+						return l.Layout(gtx)
+					}),
+				)
+			}),
+			layout.Rigid(rigidSpace(8)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.surfaceRow(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return a.Th.LabelColor(a.Th.Fonts.Modal, unit.Sp(12), a.Th.TextDim, "Show keyboard shortcuts bar").Layout(gtx)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return material.CheckBox(a.Th.M, &m.HintsToggle, "").Layout(gtx)
+						}),
+					)
+				})
+			}),
+		)
+	})
+}
+
 func (a *App) cycleDefaultStatus(delta int) {
 	if a.State.Saved == nil {
 		return
@@ -1722,6 +1805,15 @@ func (a *App) applySettingsClicks(gtx layout.Context, m *SettingsModal) {
 	}
 	if m.StatusNext.Clicked(gtx) {
 		a.cycleDefaultStatus(1)
+	}
+	if m.LogToggle.Update(gtx) {
+		a.State.Saved.EnableLogging = m.LogToggle.Value
+		a.syncLogging()
+		a.saveState()
+	}
+	if m.HintsToggle.Update(gtx) {
+		a.State.HideHints = !m.HintsToggle.Value
+		a.saveState()
 	}
 	dirty := false
 	for _, r := range m.Rows {
@@ -1831,6 +1923,14 @@ func (a *App) handleModalKey(ke key.Event) {
 			a.closeModal()
 			return
 		}
+	case "K", key.NameUpArrow:
+		if ke.Modifiers == key.ModCtrl && ke.Name == "K" {
+			if a.State.Modal == ModalSearch {
+				a.closeModal()
+			}
+			return
+		}
+		a.modalMove(-1)
 	case "F":
 		if ke.Modifiers == key.ModCtrl {
 			a.modalMove(10)
@@ -1841,8 +1941,14 @@ func (a *App) handleModalKey(ke key.Event) {
 		}
 	case key.NameDownArrow, "J":
 		a.modalMove(1)
-	case key.NameUpArrow, "K":
-		a.modalMove(-1)
+	case "N":
+		if ke.Modifiers == key.ModCtrl {
+			a.modalMove(1)
+		}
+	case "P":
+		if ke.Modifiers == key.ModCtrl {
+			a.modalMove(-1)
+		}
 	}
 }
 
