@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"strconv"
 	"strings"
 	"time"
 
@@ -85,14 +86,13 @@ func (a *App) layoutProjectCyclesHeader(gtx layout.Context) layout.Dimensions {
 		func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Baseline}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Baseline, Spacing: layout.SpaceBetween}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 							l := a.Th.LabelColor(a.Th.Fonts.IssueList, unit.Sp(16), a.Th.Text, title)
 							l.Font.Weight = 700
 							l.MaxLines = 1
 							return l.Layout(gtx)
 						}),
-						layout.Rigid(hSpace(10)),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							n := len(st.ProjectCycles)
 							word := "cycles"
@@ -314,7 +314,7 @@ func (a *App) layoutIssueListHeader(gtx layout.Context) layout.Dimensions {
 	return layout.Inset{Top: unit.Dp(12), Left: unit.Dp(16), Right: unit.Dp(16), Bottom: unit.Dp(8)}.Layout(gtx,
 		func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					l := a.Th.LabelColor(a.Th.Fonts.IssueList, unit.Sp(16), a.Th.Text, title)
 					l.Font.Weight = 700
 					l.MaxLines = 1
@@ -521,20 +521,29 @@ func labelString(labels []linear.Label, max int) string {
 	if len(labels) == 0 {
 		return ""
 	}
-	parts := []string{}
+	var sb strings.Builder
 	for i, l := range labels {
+		if i > 0 {
+			sb.WriteByte(' ')
+		}
 		if i >= max {
-			parts = append(parts, fmt.Sprintf("+%d", len(labels)-i))
+			sb.WriteString("+")
+			sb.WriteString(strconv.Itoa(len(labels) - i))
 			break
 		}
+		sb.WriteString("● ")
 		name := l.Name
-		r := []rune(name)
-		if len(r) > 4 {
-			name = string(r[:4])
+		count := 0
+		for j := range name {
+			if count == 4 {
+				name = name[:j]
+				break
+			}
+			count++
 		}
-		parts = append(parts, "● "+name)
+		sb.WriteString(name)
 	}
-	return strings.Join(parts, " ")
+	return sb.String()
 }
 
 // formatAge mirrors the lazylinear duration formatting.
@@ -544,17 +553,17 @@ func formatAge(t time.Time) string {
 	case d < time.Minute:
 		return "now"
 	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
+		return strconv.Itoa(int(d.Minutes())) + "m"
 	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
+		return strconv.Itoa(int(d.Hours())) + "h"
 	case d < 7*24*time.Hour:
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
+		return strconv.Itoa(int(d.Hours()/24)) + "d"
 	case d < 30*24*time.Hour:
-		return fmt.Sprintf("%dw", int(d.Hours()/(24*7)))
+		return strconv.Itoa(int(d.Hours()/(24*7))) + "w"
 	case d < 365*24*time.Hour:
-		return fmt.Sprintf("%dmo", int(d.Hours()/(24*30)))
+		return strconv.Itoa(int(d.Hours()/(24*30))) + "mo"
 	default:
-		return fmt.Sprintf("%dy", int(d.Hours()/(24*365)))
+		return strconv.Itoa(int(d.Hours()/(24*365))) + "y"
 	}
 }
 

@@ -7,7 +7,6 @@ import (
 	"log"
 	"log/slog"
 	"os"
-	"regexp"
 	"strings"
 	"unicode"
 
@@ -372,44 +371,46 @@ func rectStroke(gtx layout.Context, r image.Rectangle, c color.NRGBA) {
 }
 
 
+var globalKeyFilters = []event.Filter{
+	key.Filter{Name: key.NameTab, Optional: key.ModShift},
+	key.Filter{Name: "Q"},
+	key.Filter{Name: "C"},
+	key.Filter{Name: "V"},
+	key.Filter{Name: "?"},
+	key.Filter{Name: key.NameF1},
+	key.Filter{Name: "/"},
+	key.Filter{Name: ","},
+	key.Filter{Name: "K", Required: key.ModCtrl},
+	key.Filter{Name: "[", Required: key.ModCtrl},
+	key.Filter{Name: "F", Required: key.ModCtrl},
+	key.Filter{Name: "B", Required: key.ModCtrl},
+	key.Filter{Name: key.NameEscape},
+	key.Filter{Name: key.NameReturn},
+	key.Filter{Name: key.NameSpace},
+	key.Filter{Name: key.NameUpArrow},
+	key.Filter{Name: key.NameDownArrow},
+	key.Filter{Name: "J"},
+	key.Filter{Name: "K"},
+	key.Filter{Name: "H"},
+	key.Filter{Name: "L"},
+	key.Filter{Name: "S"},
+	key.Filter{Name: "E"},
+	key.Filter{Name: "R"},
+	key.Filter{Name: "T"},
+	key.Filter{Name: "T", Required: key.ModCtrl},
+	key.Filter{Name: "W", Required: key.ModCtrl},
+	key.Filter{Name: key.NameDeleteBackward, Required: key.ModCtrl},
+	key.Filter{Name: "N", Required: key.ModCtrl},
+	key.Filter{Name: "P", Required: key.ModCtrl},
+	key.Filter{Name: "P"},
+	key.Filter{Name: "Y"},
+}
+
 // handleGlobalKeys subscribes to keyboard events on the window root.
 func (a *App) handleGlobalKeys(gtx layout.Context) {
 	// Subscribe by adding key.Filter inputs.
 	for {
-		ev, ok := gtx.Event(
-			key.Filter{Name: key.NameTab, Optional: key.ModShift},
-			key.Filter{Name: "Q"},
-			key.Filter{Name: "C"},
-			key.Filter{Name: "V"},
-			key.Filter{Name: "?"},
-			key.Filter{Name: key.NameF1},
-			key.Filter{Name: "/"},
-			key.Filter{Name: ","},
-			key.Filter{Name: "K", Required: key.ModCtrl},
-			key.Filter{Name: "[", Required: key.ModCtrl},
-			key.Filter{Name: "F", Required: key.ModCtrl},
-			key.Filter{Name: "B", Required: key.ModCtrl},
-			key.Filter{Name: key.NameEscape},
-			key.Filter{Name: key.NameReturn},
-			key.Filter{Name: key.NameSpace},
-			key.Filter{Name: key.NameUpArrow},
-			key.Filter{Name: key.NameDownArrow},
-			key.Filter{Name: "J"},
-			key.Filter{Name: "K"},
-			key.Filter{Name: "H"},
-			key.Filter{Name: "L"},
-			key.Filter{Name: "S"},
-			key.Filter{Name: "E"},
-			key.Filter{Name: "R"},
-			key.Filter{Name: "T"},
-			key.Filter{Name: "T", Required: key.ModCtrl},
-			key.Filter{Name: "W", Required: key.ModCtrl},
-			key.Filter{Name: key.NameDeleteBackward, Required: key.ModCtrl},
-			key.Filter{Name: "N", Required: key.ModCtrl},
-			key.Filter{Name: "P", Required: key.ModCtrl},
-			key.Filter{Name: "P"},
-			key.Filter{Name: "Y"},
-		)
+		ev, ok := gtx.Event(globalKeyFilters...)
 		if !ok {
 			break
 		}
@@ -1167,11 +1168,15 @@ func indexOf(xs []string, s string) int {
 
 // --- Helpers used by panel files ---
 
-var bracketRegex = regexp.MustCompile(`\[.*?\]`)
-
 // cleanProjectName removes anything between '[' and ']' inclusive.
 func cleanProjectName(s string) string {
-	s = bracketRegex.ReplaceAllString(s, "")
+	start := strings.IndexByte(s, '[')
+	if start != -1 {
+		end := strings.IndexByte(s[start:], ']')
+		if end != -1 {
+			s = s[:start] + s[start+end+1:]
+		}
+	}
 	return strings.TrimSpace(s)
 }
 

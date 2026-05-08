@@ -31,16 +31,30 @@ func NewClient(token string) *Client {
 }
 
 func extractOperationName(query string) string {
-	q := strings.TrimSpace(query)
-	// Simple heuristic: find the first word after {
-	if idx := strings.Index(q, "{"); idx != -1 {
-		q = strings.TrimSpace(q[idx+1:])
-		parts := strings.Fields(q)
-		if len(parts) > 0 {
-			return strings.Split(parts[0], "(")[0]
+	idx := strings.IndexByte(query, '{')
+	if idx == -1 {
+		return "unknown"
+	}
+	q := query[idx+1:]
+	start := -1
+	for i := 0; i < len(q); i++ {
+		if q[i] != ' ' && q[i] != '\n' && q[i] != '\t' && q[i] != '\r' {
+			start = i
+			break
 		}
 	}
-	return "unknown"
+	if start == -1 {
+		return "unknown"
+	}
+	q = q[start:]
+	end := len(q)
+	for i := 0; i < len(q); i++ {
+		if q[i] == ' ' || q[i] == '\n' || q[i] == '\t' || q[i] == '\r' || q[i] == '(' {
+			end = i
+			break
+		}
+	}
+	return q[:end]
 }
 
 func (c *Client) execute(query string, vars map[string]any, resp any) error {
