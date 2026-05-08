@@ -704,6 +704,10 @@ func (a *App) handleKey(gtx layout.Context, ke key.Event) {
 			a.openSearch()
 			return
 		}
+		if st.View == ViewIssueDetail {
+			a.detailList.ScrollBy(-1)
+			return
+		}
 		if st.Focus == FocusSidebar {
 			a.moveSidebar(-1)
 		} else {
@@ -711,6 +715,10 @@ func (a *App) handleKey(gtx layout.Context, ke key.Event) {
 		}
 		return
 	case "J", key.NameDownArrow:
+		if st.View == ViewIssueDetail {
+			a.detailList.ScrollBy(1)
+			return
+		}
 		if st.Focus == FocusSidebar {
 			a.moveSidebar(1)
 		} else {
