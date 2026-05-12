@@ -96,23 +96,25 @@ type PageInfo struct {
 
 // IssueCreateInput represents the input for creating an issue.
 type IssueCreateInput struct {
-	TeamID      string  `json:"teamId"`
-	Title       string  `json:"title"`
-	Description *string `json:"description,omitempty"`
-	StateID     *string `json:"stateId,omitempty"`
-	AssigneeID  *string `json:"assigneeId,omitempty"`
-	Priority    *int    `json:"priority,omitempty"`
-	ProjectID   *string `json:"projectId,omitempty"`
-	CycleID     *string `json:"cycleId,omitempty"`
+	TeamID      string   `json:"teamId"`
+	Title       string   `json:"title"`
+	Description *string  `json:"description,omitempty"`
+	StateID     *string  `json:"stateId,omitempty"`
+	AssigneeID  *string  `json:"assigneeId,omitempty"`
+	Priority    *int     `json:"priority,omitempty"`
+	ProjectID   *string  `json:"projectId,omitempty"`
+	CycleID     *string  `json:"cycleId,omitempty"`
+	LabelIDs    []string `json:"labelIds,omitempty"`
 }
 
 // IssueUpdateInput represents the input for updating an issue.
 type IssueUpdateInput struct {
-	Title       *string `json:"title,omitempty"`
-	Description *string `json:"description,omitempty"`
-	StateID     *string `json:"stateId,omitempty"`
-	AssigneeID  *string `json:"assigneeId,omitempty"`
-	Priority    *int    `json:"priority,omitempty"`
-	ProjectID   *string `json:"projectId,omitempty"`
-	CycleID     *string `json:"cycleId,omitempty"`
+	Title       *string  `json:"title,omitempty"`
+	Description *string  `json:"description,omitempty"`
+	StateID     *string  `json:"stateId,omitempty"`
+	AssigneeID  *string  `json:"assigneeId,omitempty"`
+	Priority    *int     `json:"priority,omitempty"`
+	ProjectID   *string  `json:"projectId,omitempty"`
+	CycleID     *string  `json:"cycleId,omitempty"`
+	LabelIDs    []string `json:"labelIds,omitempty"`
 }

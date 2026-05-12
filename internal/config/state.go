@@ -59,6 +59,7 @@ func LoadState() *State {
 		CompactMode:   true,
 		ShowPriority:  true,
 		EnableLogging: true,
+		HideHints:     true,
 	}
 	if data, err := os.ReadFile(statePath()); err == nil {
 		_ = json.Unmarshal(data, state)

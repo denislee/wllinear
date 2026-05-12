@@ -115,7 +115,7 @@ func (a *App) layoutCreateIssue(gtx layout.Context) layout.Dimensions {
 
 		// Actions
 		func(gtx layout.Context) layout.Dimensions {
-			return a.modalButtons(nil, &m.Submit, "Cancel", "Create Issue", a.confirmCreateScreen, m.FocusIdx == 6)(gtx)
+			return a.modalButtons(nil, &m.Submit, "Cancel", "Create Issue", a.confirmCreateScreen, m.FocusIdx == 7)(gtx)
 		},
 	}
 
@@ -298,11 +298,11 @@ func (a *App) layoutFormAssigneeRow(m *CreateModal) layout.Widget {
 		if m.AssigneeToggle.Clicked(gtx) {
 			log.Printf("[UI] Assignee toggle clicked! New state: expanded=%v", !m.AssigneeExpanded)
 			m.AssigneeExpanded = !m.AssigneeExpanded
-			m.FocusIdx = 7
+			m.FocusIdx = 4
 		}
 
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(formRow(th, fs, "Assignee", m.FocusIdx == 7, func(gtx layout.Context) layout.Dimensions {
+			layout.Rigid(formRow(th, fs, "Assignee", m.FocusIdx == 4, func(gtx layout.Context) layout.Dimensions {
 				selectedName := "Select Assignee ▾"
 				if m.AssigneeIdx >= 0 && m.AssigneeIdx < len(m.Meta.Members) {
 					u := m.Meta.Members[m.AssigneeIdx]
@@ -312,7 +312,7 @@ func (a *App) layoutFormAssigneeRow(m *CreateModal) layout.Widget {
 					}
 				}
 
-				return chipBox(gtx, th, &m.AssigneeToggle, m.FocusIdx == 7, func(gtx layout.Context) layout.Dimensions {
+				return chipBox(gtx, th, &m.AssigneeToggle, m.FocusIdx == 4, func(gtx layout.Context) layout.Dimensions {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
 					return th.LabelColor(fs, unit.Sp(11), th.Text, selectedName).Layout(gtx)
 				})
@@ -369,11 +369,11 @@ func (a *App) layoutFormProjectRow(m *CreateModal) layout.Widget {
 		if m.ProjectToggle.Clicked(gtx) {
 			log.Printf("[UI] Project toggle clicked! New state: expanded=%v", !m.ProjectExpanded)
 			m.ProjectExpanded = !m.ProjectExpanded
-			m.FocusIdx = 4
+			m.FocusIdx = 5
 		}
 
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(formRow(th, fs, "Project", m.FocusIdx == 4, func(gtx layout.Context) layout.Dimensions {
+			layout.Rigid(formRow(th, fs, "Project", m.FocusIdx == 5, func(gtx layout.Context) layout.Dimensions {
 				selectedName := "Select Project ▾"
 				if m.ProjectIdx >= 0 && m.ProjectIdx < len(a.State.LeadingProjects) {
 					p := a.State.LeadingProjects[m.ProjectIdx]
@@ -384,7 +384,7 @@ func (a *App) layoutFormProjectRow(m *CreateModal) layout.Widget {
 					}
 				}
 
-				return chipBox(gtx, th, &m.ProjectToggle, m.FocusIdx == 4, func(gtx layout.Context) layout.Dimensions {
+				return chipBox(gtx, th, &m.ProjectToggle, m.FocusIdx == 5, func(gtx layout.Context) layout.Dimensions {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
 					return th.LabelColor(fs, unit.Sp(11), th.Text, selectedName).Layout(gtx)
 				})
@@ -441,11 +441,11 @@ func (a *App) layoutFormCycleRow(m *CreateModal) layout.Widget {
 		if m.CycleToggle.Clicked(gtx) {
 			log.Printf("[UI] Cycle toggle clicked! New state: expanded=%v", !m.CycleExpanded)
 			m.CycleExpanded = !m.CycleExpanded
-			m.FocusIdx = 5
+			m.FocusIdx = 6
 		}
 
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(formRow(th, fs, "Cycle", m.FocusIdx == 5, func(gtx layout.Context) layout.Dimensions {
+			layout.Rigid(formRow(th, fs, "Cycle", m.FocusIdx == 6, func(gtx layout.Context) layout.Dimensions {
 				selectedName := "Select Cycle ▾"
 				if m.CycleIdx >= 0 && m.CycleIdx < len(m.Meta.Cycles) {
 					c := m.Meta.Cycles[m.CycleIdx]
@@ -459,7 +459,7 @@ func (a *App) layoutFormCycleRow(m *CreateModal) layout.Widget {
 					}
 				}
 
-				return chipBox(gtx, th, &m.CycleToggle, m.FocusIdx == 5, func(gtx layout.Context) layout.Dimensions {
+				return chipBox(gtx, th, &m.CycleToggle, m.FocusIdx == 6, func(gtx layout.Context) layout.Dimensions {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
 					return th.LabelColor(fs, unit.Sp(11), th.Text, selectedName).Layout(gtx)
 				})

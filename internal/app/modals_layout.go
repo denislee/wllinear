@@ -778,6 +778,8 @@ func (a *App) layoutEditIssue(gtx layout.Context) layout.Dimensions {
 		rigidSpace(formRowGapDp),
 		a.layoutEditFormAssigneeRow(m),
 		rigidSpace(formRowGapDp),
+		a.layoutEditFormLabelRow(m),
+		rigidSpace(formRowGapDp),
 		a.layoutEditFormProjectRow(m),
 		rigidSpace(formRowGapDp),
 		a.layoutEditFormCycleRow(m),
@@ -785,7 +787,7 @@ func (a *App) layoutEditIssue(gtx layout.Context) layout.Dimensions {
 
 		// Actions
 		func(gtx layout.Context) layout.Dimensions {
-			return a.modalButtons(nil, &m.Submit, "Cancel", "Save Changes", a.confirmEditScreen, m.FocusIdx == 6)(gtx)
+			return a.modalButtons(nil, &m.Submit, "Cancel", "Save Changes", a.confirmEditScreen, m.FocusIdx == 8)(gtx)
 		},
 	}
 
@@ -932,11 +934,11 @@ func (a *App) layoutEditFormAssigneeRow(m *EditModal) layout.Widget {
 
 		if m.AssigneeToggle.Clicked(gtx) {
 			m.AssigneeExpanded = !m.AssigneeExpanded
-			m.FocusIdx = 7
+			m.FocusIdx = 4
 		}
 
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(formRow(th, fs, "Assignee", m.FocusIdx == 7, func(gtx layout.Context) layout.Dimensions {
+			layout.Rigid(formRow(th, fs, "Assignee", m.FocusIdx == 4, func(gtx layout.Context) layout.Dimensions {
 				selectedName := "Select Assignee ▾"
 				if m.AssigneeIdx >= 0 && m.AssigneeIdx < len(m.Meta.Members) {
 					u := m.Meta.Members[m.AssigneeIdx]
@@ -946,7 +948,7 @@ func (a *App) layoutEditFormAssigneeRow(m *EditModal) layout.Widget {
 					}
 				}
 
-				return chipBox(gtx, th, &m.AssigneeToggle, m.FocusIdx == 7, func(gtx layout.Context) layout.Dimensions {
+				return chipBox(gtx, th, &m.AssigneeToggle, m.FocusIdx == 4, func(gtx layout.Context) layout.Dimensions {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
 					return th.LabelColor(fs, unit.Sp(11), th.Text, selectedName).Layout(gtx)
 				})
@@ -986,6 +988,75 @@ func (a *App) layoutEditFormAssigneeRow(m *EditModal) layout.Widget {
 	}
 }
 
+func (a *App) layoutEditFormLabelRow(m *EditModal) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		th := a.Th
+		fs := th.Fonts.IssueDetail
+
+		if m.Meta == nil || len(m.Meta.Labels) == 0 {
+			return formRow(th, fs, "Label", false, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return drawDimText(gtx, th, fs, "[ None ]")
+				})
+			})(gtx)
+		}
+
+		if m.LabelToggle.Clicked(gtx) {
+			m.LabelExpanded = !m.LabelExpanded
+			m.FocusIdx = 5
+		}
+
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(formRow(th, fs, "Label", m.FocusIdx == 5, func(gtx layout.Context) layout.Dimensions {
+				selectedName := "Select Label ▾"
+				if m.LabelIdx >= 0 && m.LabelIdx < len(m.Meta.Labels) {
+					l := m.Meta.Labels[m.LabelIdx]
+					selectedName = l.Name + " ▾"
+					if m.LabelExpanded {
+						selectedName = l.Name + " ▴"
+					}
+				}
+
+				return chipBox(gtx, th, &m.LabelToggle, m.FocusIdx == 5, func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = gtx.Constraints.Max.X
+					return th.LabelColor(fs, unit.Sp(11), th.Text, selectedName).Layout(gtx)
+				})
+			})),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if !m.LabelExpanded {
+					return layout.Dimensions{}
+				}
+				return formRowExpanded(func(gtx layout.Context) layout.Dimensions {
+					children := make([]layout.FlexChild, 0, len(m.Meta.Labels))
+					for i := range m.Meta.Labels {
+						i := i
+						if i >= len(m.LabelClicks) {
+							break
+						}
+						click := &m.LabelClicks[i]
+						if click.Clicked(gtx) {
+							m.LabelIdx = i
+							m.LabelExpanded = false
+						}
+						sel := m.LabelIdx == i
+						l := m.Meta.Labels[i]
+
+						children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return chipBox(gtx, th, click, sel, func(gtx layout.Context) layout.Dimensions {
+									gtx.Constraints.Min.X = gtx.Constraints.Max.X
+									return th.LabelColor(fs, unit.Sp(11), th.Text, l.Name).Layout(gtx)
+								})
+							})
+						}))
+					}
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+				})(gtx)
+			}),
+		)
+	}
+}
+
 func (a *App) layoutEditFormProjectRow(m *EditModal) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		th := a.Th
@@ -1001,11 +1072,11 @@ func (a *App) layoutEditFormProjectRow(m *EditModal) layout.Widget {
 
 		if m.ProjectToggle.Clicked(gtx) {
 			m.ProjectExpanded = !m.ProjectExpanded
-			m.FocusIdx = 4
+			m.FocusIdx = 6
 		}
 
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(formRow(th, fs, "Project", m.FocusIdx == 4, func(gtx layout.Context) layout.Dimensions {
+			layout.Rigid(formRow(th, fs, "Project", m.FocusIdx == 6, func(gtx layout.Context) layout.Dimensions {
 				selectedName := "Select Project ▾"
 				if m.ProjectIdx >= 0 && m.ProjectIdx < len(a.State.LeadingProjects) {
 					p := a.State.LeadingProjects[m.ProjectIdx]
@@ -1016,7 +1087,7 @@ func (a *App) layoutEditFormProjectRow(m *EditModal) layout.Widget {
 					}
 				}
 
-				return chipBox(gtx, th, &m.ProjectToggle, m.FocusIdx == 4, func(gtx layout.Context) layout.Dimensions {
+				return chipBox(gtx, th, &m.ProjectToggle, m.FocusIdx == 6, func(gtx layout.Context) layout.Dimensions {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
 					return th.LabelColor(fs, unit.Sp(11), th.Text, selectedName).Layout(gtx)
 				})
@@ -1071,11 +1142,11 @@ func (a *App) layoutEditFormCycleRow(m *EditModal) layout.Widget {
 
 		if m.CycleToggle.Clicked(gtx) {
 			m.CycleExpanded = !m.CycleExpanded
-			m.FocusIdx = 5
+			m.FocusIdx = 7
 		}
 
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(formRow(th, fs, "Cycle", m.FocusIdx == 5, func(gtx layout.Context) layout.Dimensions {
+			layout.Rigid(formRow(th, fs, "Cycle", m.FocusIdx == 7, func(gtx layout.Context) layout.Dimensions {
 				selectedName := "Select Cycle ▾"
 				if m.CycleIdx >= 0 && m.CycleIdx < len(m.Meta.Cycles) {
 					c := m.Meta.Cycles[m.CycleIdx]
@@ -1089,7 +1160,7 @@ func (a *App) layoutEditFormCycleRow(m *EditModal) layout.Widget {
 					}
 				}
 
-				return chipBox(gtx, th, &m.CycleToggle, m.FocusIdx == 5, func(gtx layout.Context) layout.Dimensions {
+				return chipBox(gtx, th, &m.CycleToggle, m.FocusIdx == 7, func(gtx layout.Context) layout.Dimensions {
 					gtx.Constraints.Min.X = gtx.Constraints.Max.X
 					return th.LabelColor(fs, unit.Sp(11), th.Text, selectedName).Layout(gtx)
 				})

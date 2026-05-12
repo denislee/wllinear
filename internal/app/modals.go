@@ -25,7 +25,7 @@ type CreateModal struct {
 	CycleIdx    int
 	Priority    int // 0..4
 
-	FocusIdx int  // 0: Title, 1: Desc, 2: Prio, 3: Status, 4: Project, 5: Cycle, 6: Submit, 7: Assignee
+	FocusIdx int  // 0: Title, 1: Desc, 2: Prio, 3: Status, 4: Assignee, 5: Project, 6: Cycle, 7: Submit
 	FocusSet bool // Tracks if initial focus has been set
 	FocusReq bool // Set to true when we programmatically want to push focus
 
@@ -187,9 +187,10 @@ type EditModal struct {
 	AssigneeIdx int
 	ProjectIdx  int
 	CycleIdx    int
+	LabelIdx    int // -1 = none
 	Priority    int // 0..4
 
-	FocusIdx int  // 0: Title, 1: Desc, 2: Prio, 3: Status, 4: Project, 5: Cycle, 6: Submit, 7: Assignee
+	FocusIdx int  // 0: Title, 1: Desc, 2: Prio, 3: Status, 4: Assignee, 5: Label, 6: Project, 7: Cycle, 8: Submit
 	FocusSet bool // Tracks if initial focus has been set
 	FocusReq bool // Set to true when we programmatically want to push focus
 
@@ -197,10 +198,12 @@ type EditModal struct {
 	ProjectExpanded  bool
 	CycleExpanded    bool
 	AssigneeExpanded bool
+	LabelExpanded    bool
 	StatusToggle     widget.Clickable
 	ProjectToggle    widget.Clickable
 	CycleToggle      widget.Clickable
 	AssigneeToggle   widget.Clickable
+	LabelToggle      widget.Clickable
 
 	Submit widget.Clickable
 	Cancel widget.Clickable
@@ -209,6 +212,7 @@ type EditModal struct {
 	AssigneeClicks []widget.Clickable
 	ProjectClicks  []widget.Clickable
 	CycleClicks    []widget.Clickable
+	LabelClicks    []widget.Clickable
 	PrioClicks     [5]widget.Clickable
 
 	Meta *linear.TeamMetadata
@@ -221,6 +225,7 @@ func NewEditModal(s *State, issue linear.Issue) *EditModal {
 		AssigneeIdx: -1,
 		ProjectIdx:  -1,
 		CycleIdx:    -1,
+		LabelIdx:    -1,
 		Priority:    issue.Priority,
 	}
 	m.Title.SingleLine = true
@@ -249,6 +254,9 @@ func (m *EditModal) metaReady(s *State) {
 	if len(m.CycleClicks) != len(m.Meta.Cycles) {
 		m.CycleClicks = make([]widget.Clickable, len(m.Meta.Cycles))
 	}
+	if len(m.LabelClicks) != len(m.Meta.Labels) {
+		m.LabelClicks = make([]widget.Clickable, len(m.Meta.Labels))
+	}
 
 	for i, st := range m.Meta.States {
 		if st.ID == m.Issue.State.ID {
@@ -276,6 +284,14 @@ func (m *EditModal) metaReady(s *State) {
 		for i, c := range m.Meta.Cycles {
 			if c.ID == m.Issue.Cycle.ID {
 				m.CycleIdx = i
+				break
+			}
+		}
+	}
+	if len(m.Issue.Labels.Nodes) > 0 {
+		for i, l := range m.Meta.Labels {
+			if l.ID == m.Issue.Labels.Nodes[0].ID {
+				m.LabelIdx = i
 				break
 			}
 		}
@@ -310,6 +326,9 @@ func (m *EditModal) Build(s *State) (string, linear.IssueUpdateInput, bool) {
 		if m.CycleIdx >= 0 && m.CycleIdx < len(m.Meta.Cycles) {
 			id := m.Meta.Cycles[m.CycleIdx].ID
 			in.CycleID = &id
+		}
+		if m.LabelIdx >= 0 && m.LabelIdx < len(m.Meta.Labels) {
+			in.LabelIDs = []string{m.Meta.Labels[m.LabelIdx].ID}
 		}
 	}
 	return m.Issue.ID, in, true

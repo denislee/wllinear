@@ -130,25 +130,22 @@ func (a *App) Run() error {
 
 func (a *App) saveState() {
 	st := a.State
-	defaultStatus := "started"
-	if st.Saved != nil && st.Saved.DefaultCreateStatusType != "" {
-		defaultStatus = st.Saved.DefaultCreateStatusType
+	if st.Saved == nil {
+		return
 	}
-	saved := &config.State{
-		LastFilter:              st.ActiveFilter,
-		CompactMode:             st.Compact,
-		ShowLabels:              st.ShowLabels,
-		ShowPriority:            st.ShowPriority,
-		HideHints:               st.HideHints,
-		SidebarWidth:            st.SidebarWidth,
-		Fonts:                   fontPrefsToConfig(a.Th.Fonts),
-		DefaultCreateStatusType: defaultStatus,
-		EnableLogging:           st.Saved.EnableLogging,
-	}
+
+	st.Saved.LastFilter = st.ActiveFilter
+	st.Saved.CompactMode = st.Compact
+	st.Saved.ShowLabels = st.ShowLabels
+	st.Saved.ShowPriority = st.ShowPriority
+	st.Saved.HideHints = st.HideHints
+	st.Saved.SidebarWidth = st.SidebarWidth
+	st.Saved.Fonts = fontPrefsToConfig(a.Th.Fonts)
+
 	if st.Team != nil {
-		saved.LastTeamID = st.Team.ID
+		st.Saved.LastTeamID = st.Team.ID
 	}
-	_ = config.SaveState(saved)
+	_ = config.SaveState(st.Saved)
 }
 
 func fontPrefsFromConfig(p config.FontPrefs) ui.SectionFonts {
@@ -395,6 +392,7 @@ var globalKeyFilters = []event.Filter{
 	key.Filter{Name: "L"},
 	key.Filter{Name: "S"},
 	key.Filter{Name: "E"},
+	key.Filter{Name: "E", Required: key.ModCtrl},
 	key.Filter{Name: "R"},
 	key.Filter{Name: "T"},
 	key.Filter{Name: "T", Required: key.ModCtrl},
@@ -527,6 +525,15 @@ func (a *App) handleKey(gtx layout.Context, ke key.Event) {
 		}
 	}
 
+	if ke.Modifiers == key.ModCtrl && ke.Name == "E" {
+		if ed := a.getFocusedEditor(gtx); ed != nil {
+			runes := []rune(ed.Text())
+			n := len(runes)
+			ed.SetCaret(n, n)
+			return
+		}
+	}
+
 	// Global toggles that work everywhere (unless blocked by editor focus in handleGlobalKeys).
 	switch ke.Name {
 	case "?":
@@ -575,9 +582,9 @@ func (a *App) handleKey(gtx layout.Context, ke key.Event) {
 				}
 			case key.NameTab:
 				if ke.Modifiers.Contain(key.ModShift) {
-					m.FocusIdx = (m.FocusIdx + 6) % 7
+					m.FocusIdx = (m.FocusIdx + 7) % 8
 				} else {
-					m.FocusIdx = (m.FocusIdx + 1) % 7
+					m.FocusIdx = (m.FocusIdx + 1) % 8
 				}
 				m.FocusReq = true
 			case "J", key.NameDownArrow, key.NameRightArrow:
@@ -585,9 +592,11 @@ func (a *App) handleKey(gtx layout.Context, ke key.Event) {
 					m.Priority = clamp(m.Priority+1, 0, 4)
 				} else if m.FocusIdx == 3 && m.Meta != nil { // Status
 					m.StateIdx = clamp(m.StateIdx+1, 0, len(m.Meta.States)-1)
-				} else if m.FocusIdx == 4 { // Project
+				} else if m.FocusIdx == 4 && m.Meta != nil { // Assignee
+					m.AssigneeIdx = clamp(m.AssigneeIdx+1, 0, len(m.Meta.Members)-1)
+				} else if m.FocusIdx == 5 { // Project
 					m.ProjectIdx = clamp(m.ProjectIdx+1, 0, len(a.State.LeadingProjects)-1)
-				} else if m.FocusIdx == 5 && m.Meta != nil { // Cycle
+				} else if m.FocusIdx == 6 && m.Meta != nil { // Cycle
 					m.CycleIdx = clamp(m.CycleIdx+1, 0, len(m.Meta.Cycles)-1)
 				}
 			case "K", key.NameUpArrow, key.NameLeftArrow:
@@ -595,13 +604,15 @@ func (a *App) handleKey(gtx layout.Context, ke key.Event) {
 					m.Priority = clamp(m.Priority-1, 0, 4)
 				} else if m.FocusIdx == 3 && m.Meta != nil { // Status
 					m.StateIdx = clamp(m.StateIdx-1, 0, len(m.Meta.States)-1)
-				} else if m.FocusIdx == 4 { // Project
+				} else if m.FocusIdx == 4 && m.Meta != nil { // Assignee
+					m.AssigneeIdx = clamp(m.AssigneeIdx-1, 0, len(m.Meta.Members)-1)
+				} else if m.FocusIdx == 5 { // Project
 					m.ProjectIdx = clamp(m.ProjectIdx-1, 0, len(a.State.LeadingProjects)-1)
-				} else if m.FocusIdx == 5 && m.Meta != nil { // Cycle
+				} else if m.FocusIdx == 6 && m.Meta != nil { // Cycle
 					m.CycleIdx = clamp(m.CycleIdx-1, 0, len(m.Meta.Cycles)-1)
 				}
 			case key.NameReturn:
-				if m.FocusIdx == 6 {
+				if m.FocusIdx == 7 {
 					a.confirmCreateScreen()
 				}
 			}
@@ -621,9 +632,9 @@ func (a *App) handleKey(gtx layout.Context, ke key.Event) {
 				}
 			case key.NameTab:
 				if ke.Modifiers.Contain(key.ModShift) {
-					m.FocusIdx = (m.FocusIdx + 6) % 7
+					m.FocusIdx = (m.FocusIdx + 8) % 9
 				} else {
-					m.FocusIdx = (m.FocusIdx + 1) % 7
+					m.FocusIdx = (m.FocusIdx + 1) % 9
 				}
 				m.FocusReq = true
 			case "J", key.NameDownArrow, key.NameRightArrow:
@@ -631,9 +642,13 @@ func (a *App) handleKey(gtx layout.Context, ke key.Event) {
 					m.Priority = clamp(m.Priority+1, 0, 4)
 				} else if m.FocusIdx == 3 && m.Meta != nil {
 					m.StateIdx = clamp(m.StateIdx+1, 0, len(m.Meta.States)-1)
-				} else if m.FocusIdx == 4 {
-					m.ProjectIdx = clamp(m.ProjectIdx+1, 0, len(a.State.LeadingProjects)-1)
+				} else if m.FocusIdx == 4 && m.Meta != nil {
+					m.AssigneeIdx = clamp(m.AssigneeIdx+1, 0, len(m.Meta.Members)-1)
 				} else if m.FocusIdx == 5 && m.Meta != nil {
+					m.LabelIdx = clamp(m.LabelIdx+1, 0, len(m.Meta.Labels)-1)
+				} else if m.FocusIdx == 6 {
+					m.ProjectIdx = clamp(m.ProjectIdx+1, 0, len(a.State.LeadingProjects)-1)
+				} else if m.FocusIdx == 7 && m.Meta != nil {
 					m.CycleIdx = clamp(m.CycleIdx+1, 0, len(m.Meta.Cycles)-1)
 				}
 			case "K", key.NameUpArrow, key.NameLeftArrow:
@@ -641,13 +656,17 @@ func (a *App) handleKey(gtx layout.Context, ke key.Event) {
 					m.Priority = clamp(m.Priority-1, 0, 4)
 				} else if m.FocusIdx == 3 && m.Meta != nil {
 					m.StateIdx = clamp(m.StateIdx-1, 0, len(m.Meta.States)-1)
-				} else if m.FocusIdx == 4 {
-					m.ProjectIdx = clamp(m.ProjectIdx-1, 0, len(a.State.LeadingProjects)-1)
+				} else if m.FocusIdx == 4 && m.Meta != nil {
+					m.AssigneeIdx = clamp(m.AssigneeIdx-1, 0, len(m.Meta.Members)-1)
 				} else if m.FocusIdx == 5 && m.Meta != nil {
+					m.LabelIdx = clamp(m.LabelIdx-1, 0, len(m.Meta.Labels)-1)
+				} else if m.FocusIdx == 6 {
+					m.ProjectIdx = clamp(m.ProjectIdx-1, 0, len(a.State.LeadingProjects)-1)
+				} else if m.FocusIdx == 7 && m.Meta != nil {
 					m.CycleIdx = clamp(m.CycleIdx-1, 0, len(m.Meta.Cycles)-1)
 				}
 			case key.NameReturn:
-				if m.FocusIdx == 6 {
+				if m.FocusIdx == 8 {
 					a.confirmEditScreen()
 				}
 			}
