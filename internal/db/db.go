@@ -6,12 +6,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	_ "modernc.org/sqlite"
+
 	"github.com/denislee/wllinear/internal/linear"
 )
 
-// DB provides a local SQLite cache for issues.
+// DB provides a local SQLite cache for issues and related resources.
+//
+// Each cache table stores ONE blob row per logical key (team+filter, project,
+// team, etc.) and an updated_at timestamp so callers can implement a
+// stale-while-revalidate freshness policy.
 type DB struct {
 	conn *sql.DB
 }
@@ -21,46 +27,57 @@ func Open(path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
-	db, err := sql.Open("sqlite", path)
+	conn, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
 	}
-	if err := db.Ping(); err != nil {
+	if err := conn.Ping(); err != nil {
 		return nil, err
 	}
 
-	_, err = db.Exec(`
-		CREATE TABLE IF NOT EXISTS issues_cache (
-			team_id TEXT,
-			filter_name TEXT,
-			issue_id TEXT,
-			data BLOB,
-			pos INTEGER,
-			PRIMARY KEY (team_id, filter_name, issue_id)
+	// Drop legacy row-per-item tables if they exist — the data is purely a
+	// cache and the cost of refetching once is negligible.
+	if _, err := conn.Exec(`
+		DROP TABLE IF EXISTS issues_cache;
+		DROP TABLE IF EXISTS project_cycles_cache;
+		DROP TABLE IF EXISTS workflow_states_cache;
+	`); err != nil {
+		return nil, fmt.Errorf("drop legacy caches: %w", err)
+	}
+
+	if _, err := conn.Exec(`
+		CREATE TABLE IF NOT EXISTS issues_blob (
+			team_id TEXT NOT NULL,
+			filter_name TEXT NOT NULL,
+			data BLOB NOT NULL,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (team_id, filter_name)
 		);
-		CREATE INDEX IF NOT EXISTS idx_issues_cache_lookup ON issues_cache (team_id, filter_name, pos);
-		CREATE TABLE IF NOT EXISTS project_cycles_cache (
-			project_id TEXT,
-			cycle_id TEXT,
-			data BLOB,
-			pos INTEGER,
-			PRIMARY KEY (project_id, cycle_id)
+		CREATE TABLE IF NOT EXISTS project_cycles_blob (
+			project_id TEXT PRIMARY KEY,
+			data BLOB NOT NULL,
+			updated_at INTEGER NOT NULL
 		);
-		CREATE INDEX IF NOT EXISTS idx_project_cycles_lookup ON project_cycles_cache (project_id, pos);
-		CREATE TABLE IF NOT EXISTS workflow_states_cache (
-			team_id TEXT,
-			state_id TEXT,
-			data BLOB,
-			pos INTEGER,
-			PRIMARY KEY (team_id, state_id)
+		CREATE TABLE IF NOT EXISTS workflow_states_blob (
+			team_id TEXT PRIMARY KEY,
+			data BLOB NOT NULL,
+			updated_at INTEGER NOT NULL
 		);
-		CREATE INDEX IF NOT EXISTS idx_workflow_states_lookup ON workflow_states_cache (team_id, pos);
-	`)
-	if err != nil {
+		CREATE TABLE IF NOT EXISTS viewer_blob (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			data BLOB NOT NULL,
+			updated_at INTEGER NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS teams_blob (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			data BLOB NOT NULL,
+			updated_at INTEGER NOT NULL
+		);
+	`); err != nil {
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
 
-	return &DB{conn: db}, nil
+	return &DB{conn: conn}, nil
 }
 
 // Close closes the database connection.
@@ -71,30 +88,48 @@ func Close(d *DB) error {
 	return d.conn.Close()
 }
 
+func nowSec() int64 { return time.Now().Unix() }
+
+// readBlob fetches data + updated_at for a single-key blob.
+func (d *DB) readBlob(query string, args ...any) ([]byte, time.Time, error) {
+	if d == nil {
+		return nil, time.Time{}, nil
+	}
+	var data []byte
+	var ts int64
+	row := d.conn.QueryRow(query, args...)
+	if err := row.Scan(&data, &ts); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, time.Time{}, nil
+		}
+		return nil, time.Time{}, err
+	}
+	return data, time.Unix(ts, 0), nil
+}
+
+// --- Issues ---
+
 // GetIssues retrieves cached issues for a team and filter.
 func (d *DB) GetIssues(teamID, filterName string) ([]linear.Issue, error) {
-	if d == nil {
-		return nil, nil
-	}
-	rows, err := d.conn.Query("SELECT data FROM issues_cache WHERE team_id = ? AND filter_name = ? ORDER BY pos", teamID, filterName)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+	issues, _, err := d.GetIssuesWithTime(teamID, filterName)
+	return issues, err
+}
 
-	var issues []linear.Issue
-	for rows.Next() {
-		var data []byte
-		if err := rows.Scan(&data); err != nil {
-			return nil, err
-		}
-		var is linear.Issue
-		if err := json.Unmarshal(data, &is); err != nil {
-			return nil, err
-		}
-		issues = append(issues, is)
+// GetIssuesWithTime returns cached issues plus the time they were stored.
+// Returns (nil, zero time, nil) when there is no cache entry.
+func (d *DB) GetIssuesWithTime(teamID, filterName string) ([]linear.Issue, time.Time, error) {
+	data, ts, err := d.readBlob(
+		"SELECT data, updated_at FROM issues_blob WHERE team_id = ? AND filter_name = ?",
+		teamID, filterName,
+	)
+	if err != nil || data == nil {
+		return nil, ts, err
 	}
-	return issues, nil
+	var issues []linear.Issue
+	if err := json.Unmarshal(data, &issues); err != nil {
+		return nil, ts, err
+	}
+	return issues, ts, nil
 }
 
 // SaveIssues overwrites the cached issues for a team and filter.
@@ -102,157 +137,143 @@ func (d *DB) SaveIssues(teamID, filterName string, issues []linear.Issue) error 
 	if d == nil {
 		return nil
 	}
-	tx, err := d.conn.Begin()
+	data, err := json.Marshal(issues)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-
-	_, err = tx.Exec("DELETE FROM issues_cache WHERE team_id = ? AND filter_name = ?", teamID, filterName)
-	if err != nil {
-		return err
-	}
-
-	stmt, err := tx.Prepare("INSERT INTO issues_cache (team_id, filter_name, issue_id, data, pos) VALUES (?, ?, ?, ?, ?)")
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for i, is := range issues {
-		data, err := json.Marshal(is)
-		if err != nil {
-			return err
-		}
-		_, err = stmt.Exec(teamID, filterName, is.ID, data, i)
-		if err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
+	_, err = d.conn.Exec(
+		`INSERT INTO issues_blob (team_id, filter_name, data, updated_at) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(team_id, filter_name) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+		teamID, filterName, data, nowSec(),
+	)
+	return err
 }
 
-// GetProjectCycles retrieves cached cycles (with their completed issues) for a project.
+// --- Project cycles ---
+
 func (d *DB) GetProjectCycles(projectID string) ([]linear.ProjectCycleIssues, error) {
-	if d == nil {
-		return nil, nil
-	}
-	rows, err := d.conn.Query("SELECT data FROM project_cycles_cache WHERE project_id = ? ORDER BY pos", projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var cycles []linear.ProjectCycleIssues
-	for rows.Next() {
-		var data []byte
-		if err := rows.Scan(&data); err != nil {
-			return nil, err
-		}
-		var c linear.ProjectCycleIssues
-		if err := json.Unmarshal(data, &c); err != nil {
-			return nil, err
-		}
-		cycles = append(cycles, c)
-	}
-	return cycles, nil
+	cycles, _, err := d.GetProjectCyclesWithTime(projectID)
+	return cycles, err
 }
 
-// SaveProjectCycles overwrites the cached cycles for a project.
+func (d *DB) GetProjectCyclesWithTime(projectID string) ([]linear.ProjectCycleIssues, time.Time, error) {
+	data, ts, err := d.readBlob(
+		"SELECT data, updated_at FROM project_cycles_blob WHERE project_id = ?",
+		projectID,
+	)
+	if err != nil || data == nil {
+		return nil, ts, err
+	}
+	var cycles []linear.ProjectCycleIssues
+	if err := json.Unmarshal(data, &cycles); err != nil {
+		return nil, ts, err
+	}
+	return cycles, ts, nil
+}
+
 func (d *DB) SaveProjectCycles(projectID string, cycles []linear.ProjectCycleIssues) error {
 	if d == nil {
 		return nil
 	}
-	tx, err := d.conn.Begin()
+	data, err := json.Marshal(cycles)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-
-	_, err = tx.Exec("DELETE FROM project_cycles_cache WHERE project_id = ?", projectID)
-	if err != nil {
-		return err
-	}
-
-	stmt, err := tx.Prepare("INSERT INTO project_cycles_cache (project_id, cycle_id, data, pos) VALUES (?, ?, ?, ?)")
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for i, c := range cycles {
-		data, err := json.Marshal(c)
-		if err != nil {
-			return err
-		}
-		_, err = stmt.Exec(projectID, c.Cycle.ID, data, i)
-		if err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
+	_, err = d.conn.Exec(
+		`INSERT INTO project_cycles_blob (project_id, data, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT(project_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+		projectID, data, nowSec(),
+	)
+	return err
 }
 
-// GetWorkflowStates retrieves cached workflow states for a team.
+// --- Workflow states ---
+
 func (d *DB) GetWorkflowStates(teamID string) ([]linear.WorkflowState, error) {
-	if d == nil {
-		return nil, nil
-	}
-	rows, err := d.conn.Query("SELECT data FROM workflow_states_cache WHERE team_id = ? ORDER BY pos", teamID)
-	if err != nil {
+	data, _, err := d.readBlob(
+		"SELECT data, updated_at FROM workflow_states_blob WHERE team_id = ?",
+		teamID,
+	)
+	if err != nil || data == nil {
 		return nil, err
 	}
-	defer rows.Close()
-
 	var states []linear.WorkflowState
-	for rows.Next() {
-		var data []byte
-		if err := rows.Scan(&data); err != nil {
-			return nil, err
-		}
-		var st linear.WorkflowState
-		if err := json.Unmarshal(data, &st); err != nil {
-			return nil, err
-		}
-		states = append(states, st)
+	if err := json.Unmarshal(data, &states); err != nil {
+		return nil, err
 	}
 	return states, nil
 }
 
-// SaveWorkflowStates overwrites the cached workflow states for a team.
 func (d *DB) SaveWorkflowStates(teamID string, states []linear.WorkflowState) error {
 	if d == nil {
 		return nil
 	}
-	tx, err := d.conn.Begin()
+	data, err := json.Marshal(states)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	_, err = d.conn.Exec(
+		`INSERT INTO workflow_states_blob (team_id, data, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT(team_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+		teamID, data, nowSec(),
+	)
+	return err
+}
 
-	_, err = tx.Exec("DELETE FROM workflow_states_cache WHERE team_id = ?", teamID)
+// --- Viewer & teams (small, frequently re-fetched at startup) ---
+
+func (d *DB) GetViewer() (*linear.User, error) {
+	data, _, err := d.readBlob("SELECT data, updated_at FROM viewer_blob WHERE id = 1")
+	if err != nil || data == nil {
+		return nil, err
+	}
+	var u linear.User
+	if err := json.Unmarshal(data, &u); err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (d *DB) SaveViewer(u linear.User) error {
+	if d == nil {
+		return nil
+	}
+	data, err := json.Marshal(u)
 	if err != nil {
 		return err
 	}
+	_, err = d.conn.Exec(
+		`INSERT INTO viewer_blob (id, data, updated_at) VALUES (1, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+		data, nowSec(),
+	)
+	return err
+}
 
-	stmt, err := tx.Prepare("INSERT INTO workflow_states_cache (team_id, state_id, data, pos) VALUES (?, ?, ?, ?)")
+func (d *DB) GetTeams() ([]linear.Team, error) {
+	data, _, err := d.readBlob("SELECT data, updated_at FROM teams_blob WHERE id = 1")
+	if err != nil || data == nil {
+		return nil, err
+	}
+	var teams []linear.Team
+	if err := json.Unmarshal(data, &teams); err != nil {
+		return nil, err
+	}
+	return teams, nil
+}
+
+func (d *DB) SaveTeams(teams []linear.Team) error {
+	if d == nil {
+		return nil
+	}
+	data, err := json.Marshal(teams)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
-
-	for i, st := range states {
-		data, err := json.Marshal(st)
-		if err != nil {
-			return err
-		}
-		_, err = stmt.Exec(teamID, st.ID, data, i)
-		if err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
+	_, err = d.conn.Exec(
+		`INSERT INTO teams_blob (id, data, updated_at) VALUES (1, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+		data, nowSec(),
+	)
+	return err
 }

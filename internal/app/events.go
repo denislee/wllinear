@@ -16,7 +16,8 @@ func (e ViewerLoaded) apply(s *State) {
 	u := e.User
 	s.User = &u
 	if s.Team != nil {
-		go fetchIssues(s, s.Team.ID, s.ActiveFilter)
+		filter := buildIssueFilter(s.ActiveFilter, s)
+		go fetchIssues(s, s.Team.ID, s.ActiveFilter, filter, false)
 	}
 	go fetchLeadingProjects(s)
 }
@@ -38,7 +39,8 @@ func (e TeamsLoaded) apply(s *State) {
 		}
 		t := e.Teams[idx]
 		s.Team = &t
-		go fetchIssues(s, t.ID, s.ActiveFilter)
+		filter := buildIssueFilter(s.ActiveFilter, s)
+		go fetchIssues(s, t.ID, s.ActiveFilter, filter, false)
 		go fetchTeamMetadata(s, t.ID)
 	}
 }
@@ -59,7 +61,8 @@ func (e TeamSelected) apply(s *State) {
 	s.Detail = nil
 	s.StatusText = "Loading issues for " + t.Name + "..."
 	s.StatusKind = StatusInfo
-	go fetchIssues(s, t.ID, s.ActiveFilter)
+	filter := buildIssueFilter(s.ActiveFilter, s)
+	go fetchIssues(s, t.ID, s.ActiveFilter, filter, false)
 	go fetchTeamMetadata(s, t.ID)
 }
 
@@ -75,7 +78,8 @@ func (e FilterSelected) apply(s *State) {
 	if s.Team != nil {
 		s.StatusText = "Loading " + e.Filter + "..."
 		s.StatusKind = StatusInfo
-		go fetchIssues(s, s.Team.ID, e.Filter)
+		filter := buildIssueFilter(e.Filter, s)
+		go fetchIssues(s, s.Team.ID, e.Filter, filter, false)
 	}
 }
 
@@ -97,7 +101,7 @@ func (e ProjectSelected) apply(s *State) {
 	if s.Team != nil {
 		s.StatusText = "Loading cycles for " + e.Project.Name + "..."
 		s.StatusKind = StatusInfo
-		go fetchProjectCycles(s, e.Project)
+		go fetchProjectCycles(s, e.Project, false)
 	}
 }
 
@@ -141,10 +145,14 @@ func (e IssuesLoaded) apply(s *State) {
 	s.StatusKind = StatusOk
 }
 
-type FilterCountsLoaded struct{ Counts map[string]int }
+type FilterCountsLoaded struct {
+	Counts map[string]int
+	More   map[string]bool
+}
 
 func (e FilterCountsLoaded) apply(s *State) {
 	s.FilterCounts = e.Counts
+	s.FilterMore = e.More
 }
 
 type TeamMetadataLoaded struct{ Meta *linear.TeamMetadata }
@@ -157,7 +165,8 @@ func (e TeamMetadataLoaded) apply(s *State) {
 	}
 	s.rebuildFilters()
 	if s.Team != nil {
-		go fetchFilterCounts(s, s.Team.ID, s.Filters)
+		snap := snapshotFilters(s, s.Filters)
+		go fetchFilterCounts(s, s.Team.ID, snap)
 	}
 	// Forward to the active create/edit screen or open modal.
 	if s.Create != nil {
@@ -201,8 +210,10 @@ func (e IssueUpdated) apply(s *State) {
 	s.StatusText = "Updated " + e.Issue.Identifier
 	s.StatusKind = StatusOk
 	if s.Team != nil {
-		go fetchIssues(s, s.Team.ID, s.ActiveFilter)
-		go fetchFilterCounts(s, s.Team.ID, s.Filters)
+		filter := buildIssueFilter(s.ActiveFilter, s)
+		snap := snapshotFilters(s, s.Filters)
+		go fetchIssues(s, s.Team.ID, s.ActiveFilter, filter, true)
+		go fetchFilterCounts(s, s.Team.ID, snap)
 	}
 }
 
@@ -212,9 +223,11 @@ func (e IssueCreated) apply(s *State) {
 	s.StatusText = "Created " + e.Issue.Identifier
 	s.StatusKind = StatusOk
 	if s.Team != nil {
+		filter := buildIssueFilter(s.ActiveFilter, s)
+		snap := snapshotFilters(s, s.Filters)
 		go AutoLabel(s, []linear.Issue{e.Issue})
-		go fetchIssues(s, s.Team.ID, s.ActiveFilter)
-		go fetchFilterCounts(s, s.Team.ID, s.Filters)
+		go fetchIssues(s, s.Team.ID, s.ActiveFilter, filter, true)
+		go fetchFilterCounts(s, s.Team.ID, snap)
 	}
 }
 
@@ -237,6 +250,22 @@ func (e StatusMsg) apply(s *State) {
 	s.StatusKind = e.Kind
 }
 
+// RefreshRequested asks the UI to refire the current-filter fetch on the UI
+// goroutine. Used by background workers (e.g. AutoLabel) that finished a
+// mutation and want the issue list to refresh — they cannot safely read
+// s.Team / s.ActiveFilter themselves.
+type RefreshRequested struct{}
+
+func (RefreshRequested) apply(s *State) {
+	if s.Team == nil {
+		return
+	}
+	filter := buildIssueFilter(s.ActiveFilter, s)
+	snap := snapshotFilters(s, s.Filters)
+	go fetchIssues(s, s.Team.ID, s.ActiveFilter, filter, true)
+	go fetchFilterCounts(s, s.Team.ID, snap)
+}
+
 // rebuildFilters recomputes the sidebar filter list from current user/projects.
 func (s *State) rebuildFilters() {
 	s.Filters = []string{
@@ -244,6 +273,19 @@ func (s *State) rebuildFilters() {
 		"My Issues + Active",
 		"My Unlabeled Issues",
 	}
+}
+
+// snapshotFilters builds a name->filter map for every non-separator entry in
+// filters. Must be called on the UI goroutine.
+func snapshotFilters(s *State, filters []string) map[string]map[string]any {
+	m := make(map[string]map[string]any, len(filters))
+	for _, n := range filters {
+		if n == "---" {
+			continue
+		}
+		m[n] = buildIssueFilter(n, s)
+	}
+	return m
 }
 
 // buildIssueFilter converts a sidebar filter name to a Linear GraphQL IssueFilter.

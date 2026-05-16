@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -18,43 +19,72 @@ const (
 	apiURL         = "https://api.linear.app/graphql"
 	requestTimeout = 30 * time.Second
 	maxProjects    = 5000 // safety cap on paginated project fetch
+	cycleFanout    = 5    // max concurrent issue-by-cycle fetches
 )
 
 // Client is a Linear GraphQL client.
 type Client struct {
 	token string
+	http  *http.Client
 }
 
-// NewClient returns a new Client.
+// NewClient returns a new Client with a tuned, shared HTTP client.
 func NewClient(token string) *Client {
-	return &Client{token: token}
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          32,
+		MaxIdleConnsPerHost:   8,
+		MaxConnsPerHost:       16,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	return &Client{
+		token: token,
+		http: &http.Client{
+			Transport: transport,
+			Timeout:   requestTimeout,
+		},
+	}
 }
 
+// extractOperationName reads the operation name from `query Name(...)` or
+// `mutation Name(...)`. Returns the bare keyword if unnamed.
 func extractOperationName(query string) string {
-	idx := strings.IndexByte(query, '{')
-	if idx == -1 {
-		return "unknown"
+	q := strings.TrimLeftFunc(query, isGraphQLSpace)
+	var keyword string
+	switch {
+	case strings.HasPrefix(q, "query"):
+		keyword = "query"
+	case strings.HasPrefix(q, "mutation"):
+		keyword = "mutation"
+	case strings.HasPrefix(q, "subscription"):
+		keyword = "subscription"
+	default:
+		return "anonymous"
 	}
-	q := query[idx+1:]
-	start := -1
-	for i := 0; i < len(q); i++ {
-		if q[i] != ' ' && q[i] != '\n' && q[i] != '\t' && q[i] != '\r' {
-			start = i
+	rest := strings.TrimLeftFunc(q[len(keyword):], isGraphQLSpace)
+	end := 0
+	for end < len(rest) {
+		c := rest[end]
+		if c == '(' || c == '{' || isGraphQLSpace(rune(c)) {
 			break
 		}
+		end++
 	}
-	if start == -1 {
-		return "unknown"
+	if end == 0 {
+		return keyword
 	}
-	q = q[start:]
-	end := len(q)
-	for i := 0; i < len(q); i++ {
-		if q[i] == ' ' || q[i] == '\n' || q[i] == '\t' || q[i] == '\r' || q[i] == '(' {
-			end = i
-			break
-		}
-	}
-	return q[:end]
+	return rest[:end]
+}
+
+func isGraphQLSpace(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == ','
 }
 
 func (c *Client) execute(query string, vars map[string]any, resp any) error {
@@ -66,15 +96,19 @@ func (c *Client) execute(query string, vars map[string]any, resp any) error {
 	}
 
 	body, err := json.Marshal(map[string]any{
-		"query":     query,
-		"variables": vars,
+		"query":         query,
+		"variables":     vars,
+		"operationName": opName,
 	})
 	if err != nil {
 		log.Printf("[Linear API] Error marshaling request: %v", err)
 		return err
 	}
 
-	req, err := http.NewRequest("POST", apiURL, bytes.NewReader(body))
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(body))
 	if err != nil {
 		log.Printf("[Linear API] Error creating request: %v", err)
 		return err
@@ -82,19 +116,15 @@ func (c *Client) execute(query string, vars map[string]any, resp any) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", c.token)
 
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	defer cancel()
-	req = req.WithContext(ctx)
-
 	start := time.Now()
-	r, err := http.DefaultClient.Do(req)
+	r, err := c.http.Do(req)
 	if err != nil {
 		log.Printf("[Linear API] HTTP Request failed: %v", err)
 		return err
 	}
 	defer r.Body.Close()
 
-	log.Printf("[Linear API] Received response %d in %v", r.StatusCode, time.Since(start))
+	log.Printf("[Linear API] Received response %d in %v (%s)", r.StatusCode, time.Since(start), opName)
 
 	if r.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(r.Body)
@@ -337,6 +367,7 @@ func (c *Client) fetchProjectCycleIDs(projectID string) ([]Cycle, error) {
 }
 
 // GetProjectIssuesByCycles returns all completed issues for a project, grouped by cycle.
+// Per-cycle requests run concurrently with a bounded fan-out (cycleFanout).
 func (c *Client) GetProjectIssuesByCycles(projectID string) ([]ProjectCycleIssues, error) {
 	cycles, err := c.fetchProjectCycleIDs(projectID)
 	if err != nil {
@@ -350,11 +381,14 @@ func (c *Client) GetProjectIssuesByCycles(projectID string) ([]ProjectCycleIssue
 	var mu sync.Mutex
 	results := make([]ProjectCycleIssues, 0, len(cycles))
 	errs := make([]error, 0)
+	sem := make(chan struct{}, cycleFanout)
 
 	for _, cyc := range cycles {
 		wg.Add(1)
+		sem <- struct{}{}
 		go func(cyc Cycle) {
 			defer wg.Done()
+			defer func() { <-sem }()
 			vars := map[string]any{
 				"projectId": projectID,
 				"cycleId":   cyc.ID,
@@ -391,14 +425,6 @@ func (c *Client) GetProjectIssuesByCycles(projectID string) ([]ProjectCycleIssue
 	})
 
 	return results, nil
-}
-
-// truncate shortens s to n runes, appending an ellipsis when truncated.
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
 }
 
 // CreateIssue creates a new issue and returns it.
@@ -479,8 +505,14 @@ func (c *Client) UpdateIssue(id string, input IssueUpdateInput) (*Issue, error) 
 	return &resp.IssueUpdate.Issue, nil
 }
 
+// filterCountSampleSize bounds the per-filter response size for GetFilterCounts.
+// Counts up to this number are exact; anything above shows as N+ to the caller.
+const filterCountSampleSize = 25
+
 // GetFilterCounts returns the number of issues matching each of the provided filters.
-func (c *Client) GetFilterCounts(teamID string, filters map[string]map[string]any) (map[string]int, error) {
+// Each alias requests only `pageInfo { hasNextPage }` plus a small node slice for the
+// count; if hasNextPage is true the returned count is the sample size and the bool is true.
+func (c *Client) GetFilterCounts(teamID string, filters map[string]map[string]any) (map[string]int, map[string]bool, error) {
 	var aliases []string
 	var varDefs []string
 	vars := map[string]any{"teamId": teamID}
@@ -506,31 +538,37 @@ func (c *Client) GetFilterCounts(teamID string, filters map[string]map[string]an
 			f = newFilter
 		}
 
-		// We fetch nodes to count them, up to 50.
-		aliases = append(aliases, fmt.Sprintf("%s: issues(first: 50, filter: %s) { nodes { id } }", alias, varName))
+		aliases = append(aliases, fmt.Sprintf(
+			"%s: issues(first: %d, filter: %s) { nodes { id } pageInfo { hasNextPage } }",
+			alias, filterCountSampleSize, varName,
+		))
 		vars[fmt.Sprintf("filter%d", i)] = f
 		i++
 	}
 
-	query := fmt.Sprintf("query(%s) {\n  team(id: $teamId) {\n    %s\n  }\n}", strings.Join(varDefs, ", "), strings.Join(aliases, "\n    "))
+	query := fmt.Sprintf("query FilterCounts(%s) {\n  team(id: $teamId) {\n    %s\n  }\n}",
+		strings.Join(varDefs, ", "), strings.Join(aliases, "\n    "))
 
 	var respWrapper struct {
 		Team map[string]struct {
 			Nodes []struct {
 				ID string `json:"id"`
 			} `json:"nodes"`
+			PageInfo PageInfo `json:"pageInfo"`
 		} `json:"team"`
 	}
 
 	if err := c.execute(query, vars, &respWrapper); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	res := make(map[string]int)
+	counts := make(map[string]int, len(respWrapper.Team))
+	more := make(map[string]bool, len(respWrapper.Team))
 	for alias, val := range respWrapper.Team {
-		res[aliasToName[alias]] = len(val.Nodes)
+		counts[aliasToName[alias]] = len(val.Nodes)
+		more[aliasToName[alias]] = val.PageInfo.HasNextPage
 	}
-	return res, nil
+	return counts, more, nil
 }
 
 // GetAllIssueLabels fetches all labels in the organization.

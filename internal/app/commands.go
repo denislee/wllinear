@@ -4,13 +4,20 @@ import (
 	"os/exec"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/atotto/clipboard"
 
 	"github.com/denislee/wllinear/internal/ai"
 	"github.com/denislee/wllinear/internal/linear"
 )
+
+// cacheFreshness is the stale-while-revalidate window. A cache hit younger
+// than this skips the background refresh; older entries trigger a refresh.
+const cacheFreshness = 30 * time.Second
 
 // post is shorthand to send an event back to the UI loop.
 func post(s *State, e Event) {
@@ -22,20 +29,36 @@ func errStatus(err error) Event {
 }
 
 func fetchViewer(s *State) {
+	hadCache := false
+	if cached, err := s.DB.GetViewer(); err == nil && cached != nil {
+		hadCache = true
+		post(s, ViewerLoaded{User: *cached})
+	}
 	u, err := s.Client.GetViewer()
 	if err != nil {
-		post(s, errStatus(err))
+		if !hadCache {
+			post(s, errStatus(err))
+		}
 		return
 	}
+	_ = s.DB.SaveViewer(*u)
 	post(s, ViewerLoaded{User: *u})
 }
 
 func fetchTeams(s *State) {
+	hadCache := false
+	if cached, err := s.DB.GetTeams(); err == nil && len(cached) > 0 {
+		hadCache = true
+		post(s, TeamsLoaded{Teams: cached})
+	}
 	t, err := s.Client.GetTeams()
 	if err != nil {
-		post(s, errStatus(err))
+		if !hadCache {
+			post(s, errStatus(err))
+		}
 		return
 	}
+	_ = s.DB.SaveTeams(t)
 	post(s, TeamsLoaded{Teams: t})
 }
 
@@ -51,17 +74,22 @@ func fetchLeadingProjects(s *State) {
 	post(s, LeadingProjectsLoaded{Projects: p})
 }
 
-func fetchProjectCycles(s *State, project linear.Project) {
-	// 1. Try loading from local cache for immediate display.
-	if cached, err := s.DB.GetProjectCycles(project.ID); err == nil && len(cached) > 0 {
+func fetchProjectCycles(s *State, project linear.Project, force bool) {
+	// 1. Try loading from local cache for immediate display. Skip the network
+	//    fetch entirely if the cache is still fresh and the caller didn't force.
+	hadCache := false
+	if cached, ts, err := s.DB.GetProjectCyclesWithTime(project.ID); err == nil && len(cached) > 0 {
+		hadCache = true
 		post(s, ProjectCyclesLoaded{ProjectID: project.ID, Cycles: cached, FromCache: true})
+		if !force && time.Since(ts) < cacheFreshness {
+			return
+		}
 	}
 
 	// 2. Fetch from network in the background.
 	cycles, err := s.Client.GetProjectIssuesByCycles(project.ID)
 	if err != nil {
-		// Only surface error if we have nothing to show.
-		if len(s.ProjectCycles) == 0 {
+		if !hadCache {
 			post(s, errStatus(err))
 		}
 		return
@@ -72,18 +100,24 @@ func fetchProjectCycles(s *State, project linear.Project) {
 	post(s, ProjectCyclesLoaded{ProjectID: project.ID, Cycles: cycles})
 }
 
-func fetchIssues(s *State, teamID, filterName string) {
+// fetchIssues runs on a worker goroutine. The filter must be pre-built on the
+// UI goroutine (see buildIssueFilter) so no shared state is read here. When
+// force is false, a still-fresh cache hit skips the network round-trip.
+func fetchIssues(s *State, teamID, filterName string, filter map[string]any, force bool) {
 	// 1. Try loading from local cache for immediate display.
-	if cached, err := s.DB.GetIssues(teamID, filterName); err == nil && len(cached) > 0 {
+	hadCache := false
+	if cached, ts, err := s.DB.GetIssuesWithTime(teamID, filterName); err == nil && len(cached) > 0 {
+		hadCache = true
 		post(s, IssuesLoaded{FilterName: filterName, Issues: cached})
+		if !force && time.Since(ts) < cacheFreshness {
+			return
+		}
 	}
 
 	// 2. Fetch from network in the background.
-	filter := buildIssueFilter(filterName, s)
 	conn, err := s.Client.GetIssues(teamID, 50, "", filter, false)
 	if err != nil {
-		// Only post error if we have no cached issues to show.
-		if len(s.Issues) == 0 {
+		if !hadCache {
 			post(s, errStatus(err))
 		}
 		return
@@ -94,23 +128,18 @@ func fetchIssues(s *State, teamID, filterName string) {
 	post(s, IssuesLoaded{FilterName: filterName, Issues: conn.Nodes})
 }
 
-func fetchFilterCounts(s *State, teamID string, filters []string) {
-	m := make(map[string]map[string]any)
-	for _, n := range filters {
-		if n == "---" {
-			continue
-		}
-		m[n] = buildIssueFilter(n, s)
-	}
-	if len(m) == 0 {
+// fetchFilterCounts runs on a worker goroutine. Filters must be pre-built
+// on the UI goroutine (see snapshotFilters).
+func fetchFilterCounts(s *State, teamID string, filters map[string]map[string]any) {
+	if len(filters) == 0 {
 		return
 	}
-	counts, err := s.Client.GetFilterCounts(teamID, m)
+	counts, more, err := s.Client.GetFilterCounts(teamID, filters)
 	if err != nil {
 		// Don't surface — counts are decorative.
 		return
 	}
-	post(s, FilterCountsLoaded{Counts: counts})
+	post(s, FilterCountsLoaded{Counts: counts, More: more})
 }
 
 func fetchTeamMetadata(s *State, teamID string) {
@@ -221,7 +250,7 @@ func OpenBrowser(url string) {
 func CopyCycleIssues(s *State, c linear.ProjectCycleIssues) {
 	name := c.Cycle.Name
 	if name == "" {
-		name = "Cycle " + intStr(c.Cycle.Number)
+		name = "Cycle " + strconv.Itoa(c.Cycle.Number)
 	}
 	if len(c.Issues) == 0 {
 		post(s, StatusMsg{Text: "No issues in " + name, Kind: StatusWarn})
@@ -243,7 +272,7 @@ func CopyCycleIssues(s *State, c linear.ProjectCycleIssues) {
 		return
 	}
 	post(s, StatusMsg{
-		Text: "Copied " + intStr(len(lines)) + " issue titles to clipboard",
+		Text: "Copied " + strconv.Itoa(len(lines)) + " issue titles to clipboard",
 		Kind: StatusOk,
 	})
 }
@@ -267,7 +296,7 @@ func CopyProjectLastCycle(s *State, project linear.Project) {
 		return
 	}
 	post(s, StatusMsg{
-		Text: "Copied " + intStr(len(titles)) + " issues from " + project.Name,
+		Text: "Copied " + strconv.Itoa(len(titles)) + " issues from " + project.Name,
 		Kind: StatusOk,
 	})
 }
@@ -340,11 +369,21 @@ func AutoLabel(s *State, issues []linear.Issue) {
 		return
 	}
 
+	// Resolve labelIDs serially so that label-creation for a new name happens
+	// at most once. Then dispatch the actual UpdateIssueLabels calls in
+	// parallel with a bounded fan-out.
+	type job struct {
+		i         int
+		issue     linear.Issue
+		suggested string
+		labelID   string
+	}
+	jobs := make([]job, 0, len(issues))
 	for i, issue := range issues {
 		suggested := suggestions[issue.Identifier]
 		if suggested == "" {
 			post(s, StatusMsg{
-				Text: "Auto-label [" + intStr(i+1) + "/" + intStr(len(issues)) + "] " + issue.Identifier + ": skipped",
+				Text: "Auto-label [" + strconv.Itoa(i+1) + "/" + strconv.Itoa(len(issues)) + "] " + issue.Identifier + ": skipped",
 				Kind: StatusWarn,
 			})
 			continue
@@ -362,40 +401,31 @@ func AutoLabel(s *State, issues []linear.Issue) {
 			teamLabels[suggested] = id
 			labelID = id
 		}
-		if err := s.Client.UpdateIssueLabels(issue.ID, []string{labelID}); err != nil {
-			post(s, errStatus(err))
-			continue
-		}
-		post(s, StatusMsg{
-			Text: "Auto-label [" + intStr(i+1) + "/" + intStr(len(issues)) + "] " + issue.Identifier + " → " + suggested,
-			Kind: StatusOk,
-		})
+		jobs = append(jobs, job{i: i, issue: issue, suggested: suggested, labelID: labelID})
 	}
 
-	if s.Team != nil {
-		fetchIssues(s, s.Team.ID, s.ActiveFilter)
+	const autoLabelFanout = 4
+	sem := make(chan struct{}, autoLabelFanout)
+	var wg sync.WaitGroup
+	for _, j := range jobs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(j job) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := s.Client.UpdateIssueLabels(j.issue.ID, []string{j.labelID}); err != nil {
+				post(s, errStatus(err))
+				return
+			}
+			post(s, StatusMsg{
+				Text: "Auto-label [" + strconv.Itoa(j.i+1) + "/" + strconv.Itoa(len(issues)) + "] " + j.issue.Identifier + " → " + j.suggested,
+				Kind: StatusOk,
+			})
+		}(j)
 	}
+	wg.Wait()
+
+	post(s, RefreshRequested{})
 	post(s, StatusMsg{Text: "Auto-labeling complete", Kind: StatusOk})
 }
 
-func intStr(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if neg {
-		i--
-		b[i] = '-'
-	}
-	return string(b[i:])
-}

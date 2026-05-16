@@ -1,6 +1,6 @@
 package linear
 
-const mutationCreateIssue = `mutation($input: IssueCreateInput!) {
+const mutationCreateIssue = `mutation CreateIssue($input: IssueCreateInput!) {
 	issueCreate(input: $input) {
 		success
 		issue {` + issueFragment + `
@@ -8,7 +8,7 @@ const mutationCreateIssue = `mutation($input: IssueCreateInput!) {
 	}
 }`
 
-const mutationUpdateIssue = `mutation($id: String!, $input: IssueUpdateInput!) {
+const mutationUpdateIssue = `mutation UpdateIssue($id: String!, $input: IssueUpdateInput!) {
 	issueUpdate(id: $id, input: $input) {
 		success
 		issue {` + issueFragment + `
@@ -16,7 +16,7 @@ const mutationUpdateIssue = `mutation($id: String!, $input: IssueUpdateInput!) {
 	}
 }`
 
-const mutationCreateLabel = `mutation($name: String!, $teamId: String!) {
+const mutationCreateLabel = `mutation CreateLabel($name: String!, $teamId: String!) {
 	issueLabelCreate(input: { name: $name, teamId: $teamId }) {
 		success
 		issueLabel { id }

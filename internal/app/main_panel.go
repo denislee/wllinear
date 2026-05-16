@@ -371,8 +371,8 @@ func (a *App) drawIssueRowCompact(gtx layout.Context, is linear.Issue) layout.Di
 			layout.Rigid(statusDot(a.Th, is.State.Type)),
 			layout.Rigid(hSpace(12)),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				gtx.Constraints.Min.X = gtx.Dp(unit.Dp(80))
-				gtx.Constraints.Max.X = gtx.Dp(unit.Dp(80))
+				gtx.Constraints.Min.X = gtx.Dp(unit.Dp(83))
+				gtx.Constraints.Max.X = gtx.Dp(unit.Dp(83))
 				l := a.Th.LabelColor(fs, unit.Sp(13), a.Th.TextDim, is.Identifier)
 				l.Font.Weight = 700
 				l.MaxLines = 1

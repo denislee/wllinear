@@ -60,9 +60,10 @@ type State struct {
 	LeadingProjects []linear.Project // projects user leads (Developing)
 	Meta     *linear.TeamMetadata // current team metadata
 
-	Filters       []string       // sidebar filter list ("---" denotes a separator)
-	FilterCounts  map[string]int // filter name -> count
-	ActiveFilter  string
+	Filters      []string        // sidebar filter list ("---" denotes a separator)
+	FilterCounts map[string]int  // filter name -> count
+	FilterMore   map[string]bool // filter name -> truncated indicator (sample exceeded)
+	ActiveFilter string
 
 	Issues           []linear.Issue
 	ProjectCycles    []linear.ProjectCycleIssues

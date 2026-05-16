@@ -42,7 +42,7 @@ const issueFragment = `
 	updatedAt
 `
 
-const queryViewer = `query {
+const queryViewer = `query Viewer {
 	viewer {
 		id
 		name
@@ -50,7 +50,7 @@ const queryViewer = `query {
 	}
 }`
 
-const queryTeams = `query {
+const queryTeams = `query Teams {
 	teams {
 		nodes {
 			id
@@ -60,7 +60,7 @@ const queryTeams = `query {
 	}
 }`
 
-const queryIssues = `query($teamId: String!, $first: Int!, $after: String, $filter: IssueFilter, $includeArchived: Boolean) {
+const queryIssues = `query Issues($teamId: String!, $first: Int!, $after: String, $filter: IssueFilter, $includeArchived: Boolean) {
 	team(id: $teamId) {
 		issues(first: $first, after: $after, filter: $filter, includeArchived: $includeArchived) {
 			nodes {` + issueFragment + `
@@ -73,7 +73,7 @@ const queryIssues = `query($teamId: String!, $first: Int!, $after: String, $filt
 	}
 }`
 
-const queryMyIssues = `query($first: Int!, $after: String, $filter: IssueFilter) {
+const queryMyIssues = `query MyIssues($first: Int!, $after: String, $filter: IssueFilter) {
 	issues(first: $first, after: $after, filter: $filter) {
 		nodes {` + issueFragment + `
 		}
@@ -84,12 +84,12 @@ const queryMyIssues = `query($first: Int!, $after: String, $filter: IssueFilter)
 	}
 }`
 
-const queryIssue = `query($id: String!) {
+const queryIssue = `query Issue($id: String!) {
 	issue(id: $id) {` + issueFragment + `
 	}
 }`
 
-const queryWorkflowStates = `query($teamId: String!) {
+const queryWorkflowStates = `query WorkflowStates($teamId: String!) {
 	team(id: $teamId) {
 		states {
 			nodes {
@@ -103,7 +103,7 @@ const queryWorkflowStates = `query($teamId: String!) {
 	}
 }`
 
-const queryTeamMetadata = `query($teamId: String!) {
+const queryTeamMetadata = `query TeamMetadata($teamId: String!) {
 	team(id: $teamId) {
 		members(first: 100) {
 			nodes {
@@ -131,7 +131,7 @@ const queryTeamMetadata = `query($teamId: String!) {
 	}
 }`
 
-const queryTeamCycles = `query($teamId: String!, $after: String) {
+const queryTeamCycles = `query TeamCycles($teamId: String!, $after: String) {
 	team(id: $teamId) {
 		cycles(first: 250, after: $after) {
 			pageInfo { hasNextPage endCursor }
@@ -147,7 +147,7 @@ const queryTeamCycles = `query($teamId: String!, $after: String) {
 	}
 }`
 
-const queryAllIssueLabels = `query($after: String) {
+const queryAllIssueLabels = `query AllIssueLabels($after: String) {
 	issueLabels(first: 250, after: $after, includeArchived: false) {
 		pageInfo { hasNextPage endCursor }
 		nodes {
@@ -160,13 +160,13 @@ const queryAllIssueLabels = `query($after: String) {
 	}
 }`
 
-const queryTeamLabelByName = `query($teamId: ID!, $name: String!) {
+const queryTeamLabelByName = `query TeamLabelByName($teamId: ID!, $name: String!) {
 	issueLabels(filter: { team: { id: { eq: $teamId } }, name: { eq: $name } }, includeArchived: false) {
 		nodes { id name }
 	}
 }`
 
-const queryProjects = `query($after: String) {
+const queryProjects = `query Projects($after: String) {
 	projects(first: 250, after: $after, includeArchived: true) {
 		nodes {
 			id
@@ -185,7 +185,7 @@ const queryProjects = `query($after: String) {
 	}
 }`
 
-const queryLeadingProjects = `query($userId: ID!) {
+const queryLeadingProjects = `query LeadingProjects($userId: ID!) {
 	projects(filter: { lead: { id: { eq: $userId } }, status: { name: { eq: "Developing" } } }) {
 		nodes {
 			id
@@ -197,7 +197,7 @@ const queryLeadingProjects = `query($userId: ID!) {
 	}
 }`
 
-const queryProjectAllCycles = `query($projectId: ID!, $first: Int!, $after: String) {
+const queryProjectAllCycles = `query ProjectAllCycles($projectId: ID!, $first: Int!, $after: String) {
 	issues(filter: { project: { id: { eq: $projectId } } }, first: $first, after: $after) {
 		nodes {
 			cycle {
@@ -216,7 +216,7 @@ const queryProjectAllCycles = `query($projectId: ID!, $first: Int!, $after: Stri
 	}
 }`
 
-const queryProjectIssuesByCycle = `query($projectId: ID!, $cycleId: ID!, $first: Int!, $after: String) {
+const queryProjectIssuesByCycle = `query ProjectIssuesByCycle($projectId: ID!, $cycleId: ID!, $first: Int!, $after: String) {
 	issues(filter: { project: { id: { eq: $projectId } }, cycle: { id: { eq: $cycleId } }, state: { type: { eq: "completed" } } }, first: $first, after: $after) {
 		nodes {` + issueFragment + `
 		}

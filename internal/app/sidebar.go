@@ -61,7 +61,11 @@ func (a *App) buildSidebarRows() []sidebarRow {
 			}
 			count := ""
 			if c, ok := st.FilterCounts[f]; ok && c > 0 {
-				count = fmt.Sprintf("%d", c)
+				if st.FilterMore[f] {
+					count = fmt.Sprintf("%d+", c)
+				} else {
+					count = fmt.Sprintf("%d", c)
+				}
 			}
 			selected := st.ActiveFilter == f
 			return drawRow(gtx, a.Th, a.Th.Fonts.Sidebar, click, selected, f, count)
