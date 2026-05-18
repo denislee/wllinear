@@ -25,9 +25,10 @@ type CreateModal struct {
 	CycleIdx    int
 	Priority    int // 0..4
 
-	FocusIdx int  // 0: Title, 1: Desc, 2: Prio, 3: Status, 4: Assignee, 5: Project, 6: Cycle, 7: Submit
-	FocusSet bool // Tracks if initial focus has been set
-	FocusReq bool // Set to true when we programmatically want to push focus
+	FocusIdx     int  // 0: Title, 1: Desc, 2: Prio, 3: Status, 4: Assignee, 5: Project, 6: Cycle, 7: Submit
+	FocusSet     bool // Tracks if initial focus has been set
+	FocusReq     bool // Set to true when we programmatically want to push focus
+	LastFocusIdx int  // Tracks last focus index applied to scroll-into-view logic
 
 	StatusExpanded   bool
 	ProjectExpanded  bool

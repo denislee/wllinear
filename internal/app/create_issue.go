@@ -54,6 +54,22 @@ func (a *App) layoutCreateIssue(gtx layout.Context) layout.Dimensions {
 		m.FocusIdx = 1
 	}
 
+	// Scroll the focused form row into view when focus has changed.
+	// Item layout: 0=header, 1=spacer, then alternating (row, spacer) pairs for
+	// FocusIdx 0..7 → list item index 2,4,6,...,16. Formula: 2*FocusIdx + 2.
+	if m.LastFocusIdx != m.FocusIdx {
+		m.LastFocusIdx = m.FocusIdx
+		targetIdx := m.FocusIdx*2 + 2
+		pos := &a.createList.List.Position
+		// Strict interior: item is bounded above and below by other visible items,
+		// guaranteeing full visibility regardless of partial-clipping at edges.
+		interior := pos.Count > 2 && targetIdx > pos.First && targetIdx < pos.First+pos.Count-1
+		if !interior {
+			pos.First = targetIdx
+			pos.Offset = 0
+		}
+	}
+
 	items := []layout.Widget{
 		// Header
 		func(gtx layout.Context) layout.Dimensions {
