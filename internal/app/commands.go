@@ -74,6 +74,28 @@ func fetchLeadingProjects(s *State) {
 	post(s, LeadingProjectsLoaded{Projects: p})
 }
 
+func fetchProjectDetail(s *State, projectID string) {
+	d, err := s.Client.GetProject(projectID)
+	if err != nil {
+		post(s, errStatus(err))
+		return
+	}
+	post(s, ProjectDetailLoaded{Detail: *d})
+}
+
+// CopyProjectInfoRow copies the value of the project overlay's selected row.
+func CopyProjectInfoRow(s *State, m *ProjectInfoModal) {
+	if m == nil || m.Selected < 0 || m.Selected >= len(m.Rows) {
+		return
+	}
+	row := m.Rows[m.Selected]
+	if err := clipboard.WriteAll(row.Value); err != nil {
+		post(s, errStatus(err))
+		return
+	}
+	post(s, StatusMsg{Text: "Copied " + row.Label + ": " + truncate(row.Value, 60), Kind: StatusOk})
+}
+
 func fetchProjectCycles(s *State, project linear.Project, force bool) {
 	// 1. Try loading from local cache for immediate display. Skip the network
 	//    fetch entirely if the cache is still fresh and the caller didn't force.
@@ -198,6 +220,21 @@ func fetchMyIssues(s *State) {
 	post(s, MyIssuesLoaded{Issues: conn.Nodes})
 }
 
+// lookupIssueByIdentifier fetches a single issue directly by its
+// human-readable identifier (e.g. "TECH-123"), used as a fallback in the
+// search modal when the identifier isn't among the locally-loaded "my
+// issues". Linear's issue query accepts either the identifier or the UUID
+// and isn't scoped to a team, so this can find any issue the current API
+// key can access.
+func lookupIssueByIdentifier(s *State, identifier string) {
+	issue, err := s.Client.GetIssue(identifier)
+	if err != nil {
+		post(s, IssueLookupResult{Identifier: identifier, Err: err})
+		return
+	}
+	post(s, IssueLookupResult{Identifier: identifier, Issue: issue})
+}
+
 func updateIssueStatus(s *State, issueID, stateID string) {
 	updated, err := s.Client.UpdateIssue(issueID, linear.IssueUpdateInput{StateID: &stateID})
 	if err != nil {
@@ -215,6 +252,14 @@ func createIssue(s *State, in linear.IssueCreateInput) {
 	}
 	post(s, IssueCreated{Issue: *issue})
 	_ = clipboard.WriteAll("chore(" + issue.Identifier + "): " + strings.ReplaceAll(issue.Title, ":", ","))
+}
+
+func createComment(s *State, issueID, identifier, body string) {
+	if err := s.Client.CreateComment(issueID, body); err != nil {
+		post(s, errStatus(err))
+		return
+	}
+	post(s, StatusMsg{Text: "Posted update on " + identifier, Kind: StatusOk})
 }
 
 func editIssue(s *State, id string, in linear.IssueUpdateInput) {
@@ -297,6 +342,160 @@ func CopyProjectLastCycle(s *State, project linear.Project) {
 	}
 	post(s, StatusMsg{
 		Text: "Copied " + strconv.Itoa(len(titles)) + " issues from " + project.Name,
+		Kind: StatusOk,
+	})
+}
+
+// CopyWeeklyReportPrompt fetches the user's completed issues from the team's
+// most recently ended cycle and copies a structured LLM prompt to the
+// clipboard. The prompt asks an LLM to turn the issue list into a concise
+// Slack weekly status update.
+func CopyWeeklyReportPrompt(s *State) {
+	if s.Team == nil || s.User == nil {
+		post(s, StatusMsg{Text: "Select a team first", Kind: StatusWarn})
+		return
+	}
+	post(s, StatusMsg{Text: "Building weekly report...", Kind: StatusInfo})
+
+	report, err := s.Client.GetUserLastCycleCompletedIssues(s.Team.ID, s.User.ID)
+	if err != nil {
+		post(s, errStatus(err))
+		return
+	}
+	if len(report.Issues) == 0 {
+		post(s, StatusMsg{Text: "No completed issues in last cycle", Kind: StatusWarn})
+		return
+	}
+
+	cycleLabel := report.Cycle.Name
+	if cycleLabel == "" {
+		cycleLabel = "Cycle " + strconv.Itoa(report.Cycle.Number)
+	}
+	dateRange := report.Cycle.StartsAt.Format("2006-01-02") + " → " + report.Cycle.EndsAt.Format("2006-01-02")
+
+	var b strings.Builder
+	b.WriteString("You are writing a concise weekly status update for Slack.\n")
+	b.WriteString("Summarize the work I completed in the cycle below into a short, professional Slack message.\n")
+	b.WriteString("Output the result in Markdown format only — no preamble, no surrounding code fences, no commentary.\n")
+	b.WriteString("Guidelines:\n")
+	b.WriteString("- Lead with a one-line summary of the week's focus.\n")
+	b.WriteString("- Group related work; do not just list every issue verbatim.\n")
+	b.WriteString("- Use Markdown: `#`/`##` for headings, `-` for bullets, `**bold**` for emphasis.\n")
+	b.WriteString("- Mention the cycle name and date range once at the top.\n")
+	b.WriteString("- Keep it under ~200 words.\n")
+	b.WriteString("- Do not invent details that are not in the data.\n\n")
+
+	b.WriteString("Author: " + s.User.Name + " <" + s.User.Email + ">\n")
+	b.WriteString("Team: " + s.Team.Name + "\n")
+	b.WriteString("Cycle: " + cycleLabel + " (" + dateRange + ")\n")
+	b.WriteString("Completed issues: " + strconv.Itoa(len(report.Issues)) + "\n\n")
+	b.WriteString("---\n")
+
+	for _, is := range report.Issues {
+		b.WriteString("\n## " + is.Identifier + ": " + is.Title + "\n")
+		if is.Project != nil && is.Project.Name != "" {
+			b.WriteString("Project: " + is.Project.Name + "\n")
+		}
+		if len(is.Labels.Nodes) > 0 {
+			names := make([]string, 0, len(is.Labels.Nodes))
+			for _, l := range is.Labels.Nodes {
+				names = append(names, l.Name)
+			}
+			b.WriteString("Labels: " + strings.Join(names, ", ") + "\n")
+		}
+		b.WriteString("URL: " + is.URL + "\n")
+		if desc := strings.TrimSpace(is.Description); desc != "" {
+			if len(desc) > 800 {
+				desc = desc[:800] + "..."
+			}
+			b.WriteString("Description:\n" + desc + "\n")
+		}
+	}
+
+	if err := clipboard.WriteAll(b.String()); err != nil {
+		post(s, errStatus(err))
+		return
+	}
+	post(s, StatusMsg{
+		Text: "Copied weekly-report prompt (" + strconv.Itoa(len(report.Issues)) + " issues from " + cycleLabel + ")",
+		Kind: StatusOk,
+	})
+}
+
+// CopyTeamWeeklyReportPrompt fetches every completed issue from the team's
+// most recently ended cycle and copies a structured LLM prompt to the
+// clipboard. The prompt asks an LLM to summarize the whole team's work as a
+// Slack weekly status update.
+func CopyTeamWeeklyReportPrompt(s *State) {
+	if s.Team == nil {
+		post(s, StatusMsg{Text: "Select a team first", Kind: StatusWarn})
+		return
+	}
+	post(s, StatusMsg{Text: "Building team weekly report...", Kind: StatusInfo})
+
+	report, err := s.Client.GetTeamLastCycleCompletedIssues(s.Team.ID)
+	if err != nil {
+		post(s, errStatus(err))
+		return
+	}
+	if len(report.Issues) == 0 {
+		post(s, StatusMsg{Text: "No completed issues in last cycle", Kind: StatusWarn})
+		return
+	}
+
+	cycleLabel := report.Cycle.Name
+	if cycleLabel == "" {
+		cycleLabel = "Cycle " + strconv.Itoa(report.Cycle.Number)
+	}
+	dateRange := report.Cycle.StartsAt.Format("2006-01-02") + " → " + report.Cycle.EndsAt.Format("2006-01-02")
+
+	var b strings.Builder
+	b.WriteString("You are writing a concise weekly status update for Slack on behalf of an engineering team.\n")
+	b.WriteString("Summarize the work the team completed in the cycle below into a short, professional Slack message.\n")
+	b.WriteString("Output the result in Markdown format only — no preamble, no surrounding code fences, no commentary.\n")
+	b.WriteString("Guidelines:\n")
+	b.WriteString("- Lead with a one-line summary of the cycle's focus.\n")
+	b.WriteString("- Group related work by theme or project; do not list every issue verbatim.\n")
+	b.WriteString("- Use Markdown: `#`/`##` for headings, `-` for bullets, `**bold**` for emphasis.\n")
+	b.WriteString("- Mention the cycle name and date range once at the top.\n")
+	b.WriteString("- Keep it under ~250 words.\n")
+	b.WriteString("- Do not invent details that are not in the data.\n\n")
+
+	b.WriteString("Team: " + s.Team.Name + "\n")
+	b.WriteString("Cycle: " + cycleLabel + " (" + dateRange + ")\n")
+	b.WriteString("Completed issues: " + strconv.Itoa(len(report.Issues)) + "\n\n")
+	b.WriteString("---\n")
+
+	for _, is := range report.Issues {
+		b.WriteString("\n## " + is.Identifier + ": " + is.Title + "\n")
+		if is.Assignee != nil && is.Assignee.Name != "" {
+			b.WriteString("Assignee: " + is.Assignee.Name + "\n")
+		}
+		if is.Project != nil && is.Project.Name != "" {
+			b.WriteString("Project: " + is.Project.Name + "\n")
+		}
+		if len(is.Labels.Nodes) > 0 {
+			names := make([]string, 0, len(is.Labels.Nodes))
+			for _, l := range is.Labels.Nodes {
+				names = append(names, l.Name)
+			}
+			b.WriteString("Labels: " + strings.Join(names, ", ") + "\n")
+		}
+		b.WriteString("URL: " + is.URL + "\n")
+		if desc := strings.TrimSpace(is.Description); desc != "" {
+			if len(desc) > 800 {
+				desc = desc[:800] + "..."
+			}
+			b.WriteString("Description:\n" + desc + "\n")
+		}
+	}
+
+	if err := clipboard.WriteAll(b.String()); err != nil {
+		post(s, errStatus(err))
+		return
+	}
+	post(s, StatusMsg{
+		Text: "Copied team weekly-report prompt (" + strconv.Itoa(len(report.Issues)) + " issues from " + cycleLabel + ")",
 		Kind: StatusOk,
 	})
 }
@@ -428,4 +627,3 @@ func AutoLabel(s *State, issues []linear.Issue) {
 	post(s, RefreshRequested{})
 	post(s, StatusMsg{Text: "Auto-labeling complete", Kind: StatusOk})
 }
-

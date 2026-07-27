@@ -197,6 +197,31 @@ const queryLeadingProjects = `query LeadingProjects($userId: ID!) {
 	}
 }`
 
+const queryProjectDetail = `query ProjectDetail($id: String!) {
+	project(id: $id) {
+		id
+		name
+		description
+		content
+		status { name }
+		priority
+		priorityLabel
+		progress
+		scope
+		startDate
+		targetDate
+		startedAt
+		completedAt
+		canceledAt
+		createdAt
+		updatedAt
+		url
+		slugId
+		lead { name email }
+		members { nodes { name email } }
+	}
+}`
+
 const queryProjectAllCycles = `query ProjectAllCycles($projectId: ID!, $first: Int!, $after: String) {
 	issues(filter: { project: { id: { eq: $projectId } } }, first: $first, after: $after) {
 		nodes {

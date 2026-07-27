@@ -26,7 +26,7 @@ var globalKeyFilters = []event.Filter{
 	key.Filter{Name: "F", Required: key.ModCtrl},
 	key.Filter{Name: "B", Required: key.ModCtrl},
 	key.Filter{Name: key.NameEscape},
-	key.Filter{Name: key.NameReturn},
+	key.Filter{Name: key.NameReturn, Optional: key.ModCtrl},
 	key.Filter{Name: key.NameSpace},
 	key.Filter{Name: key.NameUpArrow},
 	key.Filter{Name: key.NameDownArrow},
@@ -43,9 +43,14 @@ var globalKeyFilters = []event.Filter{
 	key.Filter{Name: "W", Required: key.ModCtrl},
 	key.Filter{Name: key.NameDeleteBackward, Required: key.ModCtrl},
 	key.Filter{Name: "N", Required: key.ModCtrl},
+	key.Filter{Name: "N"},
+	key.Filter{Name: "O", Required: key.ModCtrl},
+	key.Filter{Name: "I", Required: key.ModCtrl},
 	key.Filter{Name: "P", Required: key.ModCtrl},
 	key.Filter{Name: "P"},
 	key.Filter{Name: "Y"},
+	key.Filter{Name: "W"},
+	key.Filter{Name: "W", Required: key.ModShift},
 }
 
 // handleGlobalKeys subscribes to keyboard events on the window root.
@@ -114,6 +119,10 @@ func (a *App) getFocusedEditor(gtx layout.Context) *widget.Editor {
 		if gtx.Focused(&m.Query) {
 			return &m.Query
 		}
+	case *CommentModal:
+		if gtx.Focused(&m.Body) {
+			return &m.Body
+		}
 	}
 	return nil
 }
@@ -180,14 +189,7 @@ func (a *App) handleKey(gtx layout.Context, ke key.Event) {
 
 	// Global toggles that work everywhere (unless blocked by editor focus in handleGlobalKeys).
 	switch ke.Name {
-	case "?":
-		st.HideHints = !st.HideHints
-		if st.Settings != nil {
-			st.Settings.HintsToggle.Value = !st.HideHints
-		}
-		a.saveState()
-		return
-	case key.NameF1:
+	case "?", key.NameF1:
 		a.openHelp()
 		return
 	case "V":
@@ -398,6 +400,10 @@ func (a *App) handleKey(gtx layout.Context, ke key.Event) {
 			}
 			return
 		}
+		if ke.Modifiers == 0 && st.View == ViewIssueDetail && st.Detail != nil {
+			a.openComment(*st.Detail)
+			return
+		}
 	case "P":
 		if ke.Modifiers == key.ModCtrl {
 			if st.Focus == FocusSidebar {
@@ -451,6 +457,21 @@ func (a *App) handleKey(gtx layout.Context, ke key.Event) {
 			a.toggleSelectedCycle()
 		}
 		return
+	case "O":
+		if ke.Modifiers == key.ModCtrl {
+			a.openSelectedInBrowser()
+			return
+		}
+	case "I":
+		if ke.Modifiers == key.ModCtrl {
+			if p := a.currentProject(); p != nil {
+				a.openProjectInfo(*p)
+			} else {
+				st.StatusText = "Select a project first (Ctrl+I shows project info)"
+				st.StatusKind = StatusWarn
+			}
+			return
+		}
 	case "S":
 		if is := a.currentIssue(); is != nil {
 			a.openStatus(*is)
@@ -506,6 +527,15 @@ func (a *App) handleKey(gtx layout.Context, ke key.Event) {
 			CopyIssue(st, *is)
 		}
 		return
+	case "W":
+		if ke.Modifiers == 0 {
+			go CopyWeeklyReportPrompt(st)
+			return
+		}
+		if ke.Modifiers == key.ModShift {
+			go CopyTeamWeeklyReportPrompt(st)
+			return
+		}
 	case "Q":
 		a.W.Perform(system.ActionClose)
 		return

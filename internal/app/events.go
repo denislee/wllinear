@@ -5,6 +5,8 @@ import (
 	"log"
 	"strings"
 
+	"gioui.org/widget"
+
 	"github.com/denislee/wllinear/internal/linear"
 )
 
@@ -103,6 +105,19 @@ func (e ProjectSelected) apply(s *State) {
 		s.StatusKind = StatusInfo
 		go fetchProjectCycles(s, e.Project, false)
 	}
+}
+
+type ProjectDetailLoaded struct{ Detail linear.ProjectDetail }
+
+func (e ProjectDetailLoaded) apply(s *State) {
+	if s.Modal != ModalProjectInfo {
+		return
+	}
+	m, ok := s.ModalState.(*ProjectInfoModal)
+	if !ok || m.ProjectID != e.Detail.ID {
+		return
+	}
+	m.SetDetail(e.Detail)
 }
 
 type ProjectCyclesLoaded struct {
@@ -237,6 +252,38 @@ func (e MyIssuesLoaded) apply(s *State) {
 	if md, ok := s.ModalState.(*SearchModal); ok && s.Modal == ModalSearch {
 		md.SetIssues(e.Issues)
 	}
+}
+
+// IssueLookupResult carries the result of a direct issue-identifier lookup
+// fired from the search modal (see SearchModal.checkIdentifierLookup). Issue
+// is nil when the identifier wasn't found.
+type IssueLookupResult struct {
+	Identifier string
+	Issue      *linear.Issue
+	Err        error
+}
+
+func (e IssueLookupResult) apply(s *State) {
+	md, ok := s.ModalState.(*SearchModal)
+	if !ok || s.Modal != ModalSearch {
+		return
+	}
+	if e.Identifier != md.LookupIdentifier {
+		return // stale result for a query the user has since changed
+	}
+	md.LookupLoading = false
+	if e.Err != nil || e.Issue == nil {
+		md.LookupNotFound = true
+		return
+	}
+	md.LookupNotFound = false
+	for _, is := range md.Issues {
+		if is.ID == e.Issue.ID {
+			return // already present in the locally-loaded list
+		}
+	}
+	md.Issues = append([]linear.Issue{*e.Issue}, md.Issues...)
+	md.Clicks = make([]widget.Clickable, len(md.Issues))
 }
 
 // StatusMsg sets the status bar text.

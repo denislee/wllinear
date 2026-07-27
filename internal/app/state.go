@@ -35,6 +35,8 @@ const (
 	ModalSearch
 	ModalTeam
 	ModalHelp
+	ModalComment
+	ModalProjectInfo
 )
 
 // Focus identifies which top-level panel currently receives keyboard input.
@@ -53,12 +55,12 @@ type State struct {
 	Cfg    *config.Config
 	Saved  *config.State
 
-	User     *linear.User
-	Teams    []linear.Team
-	Team     *linear.Team
-	Projects []linear.Project // current team's projects (from metadata)
-	LeadingProjects []linear.Project // projects user leads (Developing)
-	Meta     *linear.TeamMetadata // current team metadata
+	User            *linear.User
+	Teams           []linear.Team
+	Team            *linear.Team
+	Projects        []linear.Project     // current team's projects (from metadata)
+	LeadingProjects []linear.Project     // projects user leads (Developing)
+	Meta            *linear.TeamMetadata // current team metadata
 
 	Filters      []string        // sidebar filter list ("---" denotes a separator)
 	FilterCounts map[string]int  // filter name -> count
@@ -68,13 +70,13 @@ type State struct {
 	Issues           []linear.Issue
 	ProjectCycles    []linear.ProjectCycleIssues
 	ExpandedCycles   map[string]bool // cycle ID -> expanded
-	CurrentProjectID string // project whose cycles are being viewed (guards stale loads)
-	Selected         int    // index into Issues or ProjectCycles
-	Compact       bool
-	ShowLabels    bool
-	ShowPriority  bool
-	HideHints     bool
-	SidebarWidth  int
+	CurrentProjectID string          // project whose cycles are being viewed (guards stale loads)
+	Selected         int             // index into Issues or ProjectCycles
+	Compact          bool
+	ShowLabels       bool
+	ShowPriority     bool
+	HideHints        bool
+	SidebarWidth     int
 
 	View   View
 	Detail *linear.Issue
@@ -90,12 +92,12 @@ type State struct {
 	Settings     *SettingsModal
 
 	// Status bar text.
-	StatusText  string
-	StatusKind  StatusKind
-	HintsText   string
+	StatusText string
+	StatusKind StatusKind
+	HintsText  string
 
-	Events chan Event
-	Wakeup func() // called after an event is posted, to request a UI redraw
+	Events   chan Event
+	Wakeup   func() // called after an event is posted, to request a UI redraw
 	Inflight sync.WaitGroup
 }
 
@@ -136,4 +138,3 @@ func (s *State) Drain() bool {
 		}
 	}
 }
-

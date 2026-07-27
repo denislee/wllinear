@@ -13,20 +13,20 @@ import (
 type Theme struct {
 	M *material.Theme
 
-	BG          color.NRGBA
-	Panel       color.NRGBA
-	PanelAlt    color.NRGBA
-	Border      color.NRGBA
-	BorderHi    color.NRGBA
-	Text        color.NRGBA
-	TextDim     color.NRGBA
-	TextMuted   color.NRGBA
-	Accent      color.NRGBA // #7D56F4 — Linear purple
-	AccentDim   color.NRGBA
-	Selected    color.NRGBA // #5D4399
-	Success     color.NRGBA
-	Warning     color.NRGBA
-	Error       color.NRGBA
+	BG        color.NRGBA
+	Panel     color.NRGBA
+	PanelAlt  color.NRGBA
+	Border    color.NRGBA
+	BorderHi  color.NRGBA
+	Text      color.NRGBA
+	TextDim   color.NRGBA
+	TextMuted color.NRGBA
+	Accent    color.NRGBA // #7D56F4 — Linear purple
+	AccentDim color.NRGBA
+	Selected  color.NRGBA // #5D4399
+	Success   color.NRGBA
+	Warning   color.NRGBA
+	Error     color.NRGBA
 
 	StatusBacklog   color.NRGBA
 	StatusUnstarted color.NRGBA

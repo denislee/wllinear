@@ -299,6 +299,99 @@ func (c *Client) GetLeadingProjects(userID string) ([]Project, error) {
 	return resp.Projects.Nodes, nil
 }
 
+// GetProject fetches the full read-only detail for a single project.
+func (c *Client) GetProject(id string) (*ProjectDetail, error) {
+	vars := map[string]any{"id": id}
+	var resp struct {
+		Project ProjectDetail `json:"project"`
+	}
+	if err := c.execute(queryProjectDetail, vars, &resp); err != nil {
+		return nil, err
+	}
+	return &resp.Project, nil
+}
+
+// UserLastCycleReport bundles the most recently ended team cycle and the
+// issues the given user completed in it.
+type UserLastCycleReport struct {
+	Cycle  Cycle
+	Issues []Issue
+}
+
+// GetUserLastCycleCompletedIssues returns the user's completed issues from the
+// team's most recently ended cycle (the previous cycle, not the in-progress one).
+func (c *Client) GetUserLastCycleCompletedIssues(teamID, userID string) (*UserLastCycleReport, error) {
+	cycles, err := c.getAllTeamCycles(teamID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	var last *Cycle
+	for i := range cycles {
+		cy := cycles[i]
+		if !cy.EndsAt.IsZero() && cy.EndsAt.After(now) {
+			continue
+		}
+		if last == nil || cy.EndsAt.After(last.EndsAt) {
+			last = &cy
+		}
+	}
+	if last == nil {
+		return nil, fmt.Errorf("no completed cycle found for team")
+	}
+
+	filter := map[string]any{
+		"cycle":    map[string]any{"id": map[string]any{"eq": last.ID}},
+		"assignee": map[string]any{"id": map[string]any{"eq": userID}},
+		"state":    map[string]any{"type": map[string]any{"eq": "completed"}},
+	}
+	conn, err := c.GetIssues(teamID, 250, "", filter, true)
+	if err != nil {
+		return nil, err
+	}
+	return &UserLastCycleReport{Cycle: *last, Issues: conn.Nodes}, nil
+}
+
+// TeamLastCycleReport bundles the most recently ended team cycle and all
+// completed issues in it (across all assignees).
+type TeamLastCycleReport struct {
+	Cycle  Cycle
+	Issues []Issue
+}
+
+// GetTeamLastCycleCompletedIssues returns every completed issue from the
+// team's most recently ended cycle, regardless of assignee.
+func (c *Client) GetTeamLastCycleCompletedIssues(teamID string) (*TeamLastCycleReport, error) {
+	cycles, err := c.getAllTeamCycles(teamID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	var last *Cycle
+	for i := range cycles {
+		cy := cycles[i]
+		if !cy.EndsAt.IsZero() && cy.EndsAt.After(now) {
+			continue
+		}
+		if last == nil || cy.EndsAt.After(last.EndsAt) {
+			last = &cy
+		}
+	}
+	if last == nil {
+		return nil, fmt.Errorf("no completed cycle found for team")
+	}
+
+	filter := map[string]any{
+		"cycle": map[string]any{"id": map[string]any{"eq": last.ID}},
+		"state": map[string]any{"type": map[string]any{"eq": "completed"}},
+	}
+	conn, err := c.GetIssues(teamID, 250, "", filter, true)
+	if err != nil {
+		return nil, err
+	}
+	return &TeamLastCycleReport{Cycle: *last, Issues: conn.Nodes}, nil
+}
+
 // GetProjectIssuesFromLastCycle returns names of completed issues from the most
 // recently ended cycle of a project.
 func (c *Client) GetProjectIssuesFromLastCycle(projectID string) ([]string, error) {
@@ -469,6 +562,22 @@ func (c *Client) GetIssues(teamID string, first int, after string, filter map[st
 	return &resp.Team.Issues, nil
 }
 
+// GetIssue returns a single issue by its human-readable identifier (e.g.
+// "TECH-123") or UUID. Unlike GetIssues, this isn't scoped to a team or
+// assignee, so it can find any issue the current API key can access.
+func (c *Client) GetIssue(id string) (*Issue, error) {
+	vars := map[string]any{
+		"id": id,
+	}
+	var resp struct {
+		Issue Issue `json:"issue"`
+	}
+	if err := c.execute(queryIssue, vars, &resp); err != nil {
+		return nil, err
+	}
+	return &resp.Issue, nil
+}
+
 // GetWorkflowStates returns all workflow states for a team.
 func (c *Client) GetWorkflowStates(teamID string) ([]WorkflowState, error) {
 	vars := map[string]any{
@@ -616,6 +725,23 @@ func (c *Client) CreateLabel(name, teamID string) (string, error) {
 		return "", err
 	}
 	return resp.IssueLabelCreate.IssueLabel.ID, nil
+}
+
+// CreateComment posts a new comment on the given issue.
+func (c *Client) CreateComment(issueID, body string) error {
+	vars := map[string]any{
+		"issueId": issueID,
+		"body":    body,
+	}
+	var resp struct {
+		CommentCreate struct {
+			Success bool `json:"success"`
+			Comment struct {
+				ID string `json:"id"`
+			} `json:"comment"`
+		} `json:"commentCreate"`
+	}
+	return c.execute(mutationCreateComment, vars, &resp)
 }
 
 // UpdateIssueLabels replaces the labels on an issue.

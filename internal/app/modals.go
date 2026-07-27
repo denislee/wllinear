@@ -2,6 +2,8 @@ package app
 
 import (
 	"log"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,30 +98,7 @@ func (m *CreateModal) metaReady(s *State) {
 			}
 		}
 	}
-	if m.StateIdx == -1 {
-		preferred := "started"
-		if s.Saved != nil && s.Saved.DefaultCreateStatusType != "" {
-			preferred = s.Saved.DefaultCreateStatusType
-		}
-		for i, st := range m.Meta.States {
-			if st.Type == preferred {
-				m.StateIdx = i
-				break
-			}
-		}
-		// Fall back to unstarted/backlog, then first state.
-		if m.StateIdx == -1 {
-			for i, st := range m.Meta.States {
-				if st.Type == "unstarted" || st.Type == "backlog" {
-					m.StateIdx = i
-					break
-				}
-			}
-		}
-		if m.StateIdx == -1 && len(m.Meta.States) > 0 {
-			m.StateIdx = 0
-		}
-	}
+	m.applyDefaultStatus(s)
 	if m.CycleIdx == -1 {
 		now := time.Now()
 		for i, c := range m.Meta.Cycles {
@@ -134,6 +113,54 @@ func (m *CreateModal) metaReady(s *State) {
 			}
 		}
 	}
+}
+
+// applyDefaultStatus sets m.StateIdx based on the user's preferred default
+// workflow-state type (e.g. "started" → "In Progress"). Safe to call
+// repeatedly: it only runs while StateIdx is still -1, so a user-picked
+// status is preserved. Called both from metaReady (when team metadata
+// arrives) and from the create-issue layout (as a safety net for any
+// timing race between modal-open and metadata-load).
+func (m *CreateModal) applyDefaultStatus(s *State) {
+	if m == nil || m.Meta == nil || len(m.Meta.States) == 0 {
+		return
+	}
+	if m.StateIdx != -1 {
+		return
+	}
+	preferred := "started"
+	if s != nil && s.Saved != nil && s.Saved.DefaultCreateStatusType != "" {
+		preferred = s.Saved.DefaultCreateStatusType
+	}
+	// 1) Match by display name first. Teams commonly have multiple states
+	//    that share a workflow-state type (e.g. "In Progress", "In Review",
+	//    "Blocked" all have type=="started"), so picking by type alone is
+	//    ambiguous. Name match — e.g. "In Progress" for the "started"
+	//    preference — picks the canonical one when present.
+	wantName := createStatusLabel(preferred)
+	for i, st := range m.Meta.States {
+		if strings.EqualFold(st.Name, wantName) {
+			m.StateIdx = i
+			return
+		}
+	}
+	// 2) Fall back to matching by workflow-state type. Picks the first
+	//    state in that bucket — fine when there's only one, the best we
+	//    can do without further guidance when there are several.
+	for i, st := range m.Meta.States {
+		if st.Type == preferred {
+			m.StateIdx = i
+			return
+		}
+	}
+	// 3) Fall back to a sensible non-completed bucket, then first state.
+	for i, st := range m.Meta.States {
+		if st.Type == "unstarted" || st.Type == "backlog" {
+			m.StateIdx = i
+			return
+		}
+	}
+	m.StateIdx = 0
 }
 
 func (m *CreateModal) Build(s *State) (linear.IssueCreateInput, bool) {
@@ -381,6 +408,19 @@ type SearchModal struct {
 	Cancel   widget.Clickable
 	Clicks   []widget.Clickable
 	FocusSet bool
+
+	// lastQuery is the query text as of the last identifier-lookup check, so
+	// checkIdentifierLookup only reacts to actual edits.
+	lastQuery string
+	// LookupIdentifier is the identifier-shaped query (e.g. "TECH-12762") a
+	// direct API lookup has been requested for, since the locally-loaded
+	// Issues list only contains a recent subset assigned to the current user
+	// in the current team.
+	LookupIdentifier string
+	// LookupLoading is true while a direct identifier lookup is in flight.
+	LookupLoading bool
+	// LookupNotFound is true when the last completed lookup found nothing.
+	LookupNotFound bool
 }
 
 func NewSearchModal() *SearchModal {
@@ -392,6 +432,43 @@ func NewSearchModal() *SearchModal {
 func (m *SearchModal) SetIssues(issues []linear.Issue) {
 	m.Issues = issues
 	m.Clicks = make([]widget.Clickable, len(issues))
+}
+
+// issueIdentifierPattern matches a full Linear issue identifier such as
+// "TECH-12762".
+var issueIdentifierPattern = regexp.MustCompile(`^[A-Za-z]+-\d+$`)
+
+// checkIdentifierLookup fires a direct API lookup when the query text looks
+// like a full issue code (e.g. "TECH-12762") and no locally-loaded issue
+// matches it. Issues only holds a recent subset of issues assigned to the
+// current user in the current team, so this is a fallback to find issues
+// outside that set. No-op when the query text hasn't changed since the last
+// check.
+func (m *SearchModal) checkIdentifierLookup(s *State) {
+	text := m.Query.Text()
+	if text == m.lastQuery {
+		return
+	}
+	m.lastQuery = text
+
+	q := strings.ToUpper(strings.TrimSpace(text))
+	if !issueIdentifierPattern.MatchString(q) {
+		m.LookupIdentifier = ""
+		m.LookupLoading = false
+		m.LookupNotFound = false
+		return
+	}
+	if q == m.LookupIdentifier {
+		return
+	}
+	if len(m.Filter()) > 0 {
+		return
+	}
+
+	m.LookupIdentifier = q
+	m.LookupLoading = true
+	m.LookupNotFound = false
+	go lookupIssueByIdentifier(s, q)
 }
 
 // SettingsModal is the per-section font/size configuration overlay.
@@ -471,6 +548,19 @@ func (m *SearchModal) Filter() []linear.Issue {
 	return out
 }
 
+// CommentModal is the new-comment overlay (N on issue detail).
+type CommentModal struct {
+	Issue    linear.Issue
+	Body     widget.Editor
+	Submit   widget.Clickable
+	Cancel   widget.Clickable
+	FocusSet bool
+}
+
+func NewCommentModal(issue linear.Issue) *CommentModal {
+	return &CommentModal{Issue: issue}
+}
+
 // TeamModal is the team selection overlay (Ctrl+T).
 type TeamModal struct {
 	Teams    []linear.Team
@@ -487,4 +577,117 @@ func NewTeamModal() *TeamModal {
 func (m *TeamModal) SetTeams(teams []linear.Team) {
 	m.Teams = teams
 	m.Clicks = make([]widget.Clickable, len(teams))
+}
+
+// ProjectInfoRow is one label/value pair in the read-only project overlay.
+type ProjectInfoRow struct {
+	Label string
+	Value string
+}
+
+// ProjectInfoModal is the read-only project information overlay (Ctrl+I). It
+// opens immediately with the few fields already known from the sidebar, then
+// swaps in the full field set once the detail fetch completes.
+type ProjectInfoModal struct {
+	ProjectID string
+	Name      string
+	Loading   bool
+	Rows      []ProjectInfoRow
+	Selected  int
+	List      widget.List
+}
+
+func NewProjectInfoModal(p linear.Project) *ProjectInfoModal {
+	m := &ProjectInfoModal{
+		ProjectID: p.ID,
+		Name:      cleanProjectName(p.Name),
+		Loading:   true,
+		Rows:      projectBasicRows(p),
+	}
+	m.List.Axis = layout.Vertical
+	return m
+}
+
+// SetDetail replaces the modal's rows with the full project detail, preserving
+// the current selection where possible.
+func (m *ProjectInfoModal) SetDetail(d linear.ProjectDetail) {
+	m.Loading = false
+	if n := cleanProjectName(d.Name); n != "" {
+		m.Name = n
+	}
+	m.Rows = projectDetailRows(d)
+	if m.Selected >= len(m.Rows) {
+		m.Selected = 0
+	}
+}
+
+// projectBasicRows builds the placeholder rows shown before the detail fetch
+// returns, from the fields already available on the sidebar Project.
+func projectBasicRows(p linear.Project) []ProjectInfoRow {
+	rows := []ProjectInfoRow{{Label: "Name", Value: cleanProjectName(p.Name)}}
+	if p.Status.Name != "" {
+		rows = append(rows, ProjectInfoRow{Label: "Status", Value: p.Status.Name})
+	}
+	if p.Lead != nil && p.Lead.Name != "" {
+		rows = append(rows, ProjectInfoRow{Label: "Lead", Value: p.Lead.Name})
+	}
+	return rows
+}
+
+// projectDetailRows flattens a ProjectDetail into ordered label/value rows,
+// skipping any field that is empty.
+func projectDetailRows(d linear.ProjectDetail) []ProjectInfoRow {
+	rows := make([]ProjectInfoRow, 0, 18)
+	add := func(label, value string) {
+		if strings.TrimSpace(value) == "" {
+			return
+		}
+		rows = append(rows, ProjectInfoRow{Label: label, Value: value})
+	}
+	add("Name", cleanProjectName(d.Name))
+	status := d.Status.Name
+	if status == "" {
+		status = d.State
+	}
+	add("Status", status)
+	add("Priority", d.PriorityLabel)
+	if d.Progress > 0 {
+		add("Progress", strconv.Itoa(int(d.Progress*100+0.5))+"%")
+	}
+	if d.Lead != nil {
+		lead := d.Lead.Name
+		if d.Lead.Email != "" {
+			lead += " <" + d.Lead.Email + ">"
+		}
+		add("Lead", lead)
+	}
+	if len(d.Members.Nodes) > 0 {
+		names := make([]string, 0, len(d.Members.Nodes))
+		for _, u := range d.Members.Nodes {
+			names = append(names, u.Name)
+		}
+		add("Members", strings.Join(names, ", "))
+	}
+	add("Start date", d.StartDate)
+	add("Target date", d.TargetDate)
+	if d.StartedAt != nil && !d.StartedAt.IsZero() {
+		add("Started", d.StartedAt.Format("2006-01-02"))
+	}
+	if d.CompletedAt != nil && !d.CompletedAt.IsZero() {
+		add("Completed", d.CompletedAt.Format("2006-01-02"))
+	}
+	if d.CanceledAt != nil && !d.CanceledAt.IsZero() {
+		add("Canceled", d.CanceledAt.Format("2006-01-02"))
+	}
+	if !d.CreatedAt.IsZero() {
+		add("Created", d.CreatedAt.Format("2006-01-02"))
+	}
+	if !d.UpdatedAt.IsZero() {
+		add("Updated", d.UpdatedAt.Format("2006-01-02"))
+	}
+	add("Description", strings.TrimSpace(d.Description))
+	add("Content", strings.TrimSpace(d.Content))
+	add("URL", d.URL)
+	add("ID", d.ID)
+	return rows
 }

@@ -216,6 +216,11 @@ func (a *App) layoutFormStatusRow(m *CreateModal) layout.Widget {
 			})(gtx)
 		}
 
+		// Safety net: if metadata arrived after the modal opened and the
+		// metaReady path somehow missed setting the default (e.g. modal
+		// rebuilt mid-load), pick up the user's preferred default now.
+		m.applyDefaultStatus(a.State)
+
 		if m.StatusToggle.Clicked(gtx) {
 			log.Printf("[UI] Status toggle clicked! New state: expanded=%v", !m.StatusExpanded)
 			m.StatusExpanded = !m.StatusExpanded

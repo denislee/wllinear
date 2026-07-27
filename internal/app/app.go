@@ -51,9 +51,9 @@ type App struct {
 	createList  widget.List
 	editList    widget.List
 
-	helpClick   widget.Clickable
-	createClick widget.Clickable
-	searchClick widget.Clickable
+	helpClick    widget.Clickable
+	createClick  widget.Clickable
+	searchClick  widget.Clickable
 	refreshClick widget.Clickable
 	compactClick widget.Clickable
 
@@ -62,8 +62,8 @@ type App struct {
 	dragStartWidth int
 	splitterTag    struct{}
 
-	saveMu     sync.Mutex
-	saveTimer  *time.Timer
+	saveMu    sync.Mutex
+	saveTimer *time.Timer
 }
 
 // NewApp constructs a new App and dispatches the initial fetches.
@@ -84,7 +84,7 @@ func NewApp(w *app.Window, client *linear.Client, d *db.DB, cfg *config.Config, 
 		HideHints:    saved.HideHints,
 		SidebarWidth: saved.SidebarWidth,
 		Focus:        FocusSidebar,
-		HintsText:    "tab: switch panel  •  c: create  •  ctrl+k: search  •  ,: settings  •  ?: toggle bar • F1: help",
+		HintsText:    "tab: switch panel  •  c: create  •  ctrl+k: search  •  ,: settings  •  ?: help",
 		StatusText:   "Connecting to Linear...",
 	}
 	st.rebuildFilters()
@@ -212,7 +212,6 @@ func fontPrefsToConfig(s ui.SectionFonts) config.FontPrefs {
 	}
 }
 
-
 // --- Layout ---
 
 func (a *App) layout(gtx layout.Context) {
@@ -307,7 +306,7 @@ func (a *App) layout(gtx layout.Context) {
 		}
 		a.layoutSettingsSide(gtx, image.Rect(body.Max.X-settingsW, body.Min.Y, body.Max.X, body.Max.Y))
 	}
-	
+
 	a.layoutStatusBar(gtx, bottom)
 
 	// Modal overlay last (top z-order).
@@ -403,12 +402,10 @@ func rectStroke(gtx layout.Context, r image.Rectangle, c color.NRGBA) {
 	rect(gtx, image.Rect(r.Max.X-one, r.Min.Y, r.Max.X, r.Max.Y), c)
 }
 
-
-
 func (a *App) updateHints() {
 	st := a.State
 	if st.Modal != ModalNone {
-		st.HintsText = "tab: fields  •  enter: submit  •  esc: cancel  •  ?: toggle bar  •  F1: help"
+		st.HintsText = "tab: fields  •  enter: submit  •  esc: cancel  •  ?: help"
 		return
 	}
 	if st.View == ViewCreateIssue {
@@ -420,18 +417,18 @@ func (a *App) updateHints() {
 		return
 	}
 	if st.View == ViewIssueDetail {
-		st.HintsText = "esc/h: back  •  e: edit  •  s: status  •  ?: toggle bar • F1: help"
+		st.HintsText = "esc/h: back  •  e: edit  •  s: status  •  ?: help"
 		return
 	}
 	switch st.Focus {
 	case FocusSidebar:
-		st.HintsText = "j/k: navigate  •  enter/l: select  •  c: create  •  ctrl+k: search  •  ctrl+r: reload  •  tab: issues  •  ?: toggle bar • F1: help"
+		st.HintsText = "j/k: navigate  •  enter/l: select  •  c: create  •  ctrl+k: search  •  ctrl+r: reload  •  tab: issues  •  ?: help"
 	case FocusMain:
-		hints := "j/k: navigate  •  enter: browser  •  l: open  •  e: edit  •  s: status  •  c: create  •  v: compact  •  t: tags  •  r: refresh  •  ctrl+r: reload  •  ?: toggle bar • F1: help"
+		hints := "j/k: navigate  •  enter: browser  •  l: open  •  e: edit  •  s: status  •  c: create  •  v: compact  •  t: tags  •  r: refresh  •  ctrl+r: reload  •  ?: help"
 		if st.View == ViewProjectCycles {
-			hints = "j/k: navigate  •  space/enter: expand  •  y: copy issues  •  r: refresh  •  ctrl+r: reload  •  ?: toggle bar • F1: help"
+			hints = "j/k: navigate  •  space/enter: expand  •  y: copy issues  •  r: refresh  •  ctrl+r: reload  •  ?: help"
 		} else if st.ActiveFilter == "My Unlabeled Issues" {
-			hints = "t: auto-label  •  j/k: navigate  •  enter: browser  •  l: open  •  e: edit  •  s: status  •  c: create  •  v: compact  •  r: refresh  •  ctrl+r: reload  •  ?: toggle bar • F1: help"
+			hints = "t: auto-label  •  j/k: navigate  •  enter: browser  •  l: open  •  e: edit  •  s: status  •  c: create  •  v: compact  •  r: refresh  •  ctrl+r: reload  •  ?: help"
 		}
 		st.HintsText = hints
 	}
@@ -654,6 +651,13 @@ func (a *App) confirmEditScreen() {
 	a.closeEdit()
 }
 
+func (a *App) openComment(issue linear.Issue) {
+	st := a.State
+	st.Modal = ModalComment
+	st.ModalState = NewCommentModal(issue)
+	a.updateHints()
+}
+
 func (a *App) openStatus(issue linear.Issue) {
 	st := a.State
 	st.Modal = ModalStatus
@@ -681,6 +685,36 @@ func (a *App) openSearch() {
 	st.Modal = ModalSearch
 	st.ModalState = NewSearchModal()
 	go fetchMyIssues(st)
+	a.updateHints()
+}
+
+// currentProject returns the project currently selected in the sidebar, or
+// nil when the active selection is a plain filter rather than a project.
+func (a *App) currentProject() *linear.Project {
+	st := a.State
+	if strings.HasPrefix(st.ActiveFilter, "Project: ") {
+		name := strings.TrimPrefix(st.ActiveFilter, "Project: ")
+		for i := range st.LeadingProjects {
+			if st.LeadingProjects[i].Name == name {
+				return &st.LeadingProjects[i]
+			}
+		}
+	}
+	if st.CurrentProjectID != "" {
+		for i := range st.LeadingProjects {
+			if st.LeadingProjects[i].ID == st.CurrentProjectID {
+				return &st.LeadingProjects[i]
+			}
+		}
+	}
+	return nil
+}
+
+func (a *App) openProjectInfo(p linear.Project) {
+	st := a.State
+	st.Modal = ModalProjectInfo
+	st.ModalState = NewProjectInfoModal(p)
+	go fetchProjectDetail(st, p.ID)
 	a.updateHints()
 }
 

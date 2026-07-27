@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"log"
 	"strconv"
+	"strings"
 
 	"gioui.org/io/key"
 	"gioui.org/layout"
@@ -37,6 +38,10 @@ func (a *App) layoutModal(gtx layout.Context, body image.Rectangle) {
 		a.layoutSearchModal(gtx)
 	case ModalTeam:
 		a.layoutTeamModal(gtx)
+	case ModalComment:
+		a.layoutCommentModal(gtx)
+	case ModalProjectInfo:
+		a.layoutProjectInfoModal(gtx)
 	}
 }
 
@@ -72,46 +77,7 @@ func (a *App) modalCard(gtx layout.Context, maxW, maxH int, w layout.Widget) lay
 // --- Help ---
 
 func (a *App) layoutHelpModal(gtx layout.Context) layout.Dimensions {
-	type pair struct{ k, d string }
-	type sec struct {
-		title string
-		keys  []pair
-	}
-	sections := []sec{
-		{"Global", []pair{
-			{"q / ctrl+c", "quit"},
-			{"ctrl+r", "refresh issues & projects"},
-			{"tab / shift+tab", "switch panel"},
-			{"c", "create issue"},
-			{"ctrl+k", "search issues"},
-			{",", "settings (fonts)"},
-			{"v", "toggle compact"},
-			{"?", "toggle hints bar"},
-			{"F1", "show this help"},
-		}},
-		{"Sidebar", []pair{
-			{"j / k", "navigate"},
-			{"enter / l", "select filter or focus issues"},
-		}},
-		{"Issue list", []pair{
-			{"j / k", "navigate"},
-			{"enter", "open in browser"},
-			{"l", "open detail"},
-			{"e", "edit"},
-			{"s", "change status"},
-			{"r", "refresh"},
-			{"t", "toggle tags or auto-label"},
-		}},
-		{"Issue detail", []pair{
-			{"esc / h", "back"},
-			{"e", "edit"},
-			{"s", "change status"},
-		}},
-		{"Modals", []pair{
-			{"esc", "cancel"},
-			{"enter", "submit"},
-		}},
-	}
+	sections := a.helpSectionsForContext()
 
 	fs := a.Th.Fonts.Modal
 	return a.modalCard(gtx, gtx.Dp(unit.Dp(560)), gtx.Dp(unit.Dp(560)), func(gtx layout.Context) layout.Dimensions {
@@ -149,10 +115,201 @@ func (a *App) layoutHelpModal(gtx layout.Context) layout.Dimensions {
 			children = append(children, layout.Rigid(rigidSpace(8)))
 		}
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return a.Th.LabelColor(fs, unit.Sp(11), a.Th.TextMuted, "Press esc or ? to close").Layout(gtx)
+			return a.Th.LabelColor(fs, unit.Sp(11), a.Th.TextMuted, "Press esc, ?, or F1 to close").Layout(gtx)
 		}))
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 	})
+}
+
+// helpPair is one row in the help overlay: a key combo and its description.
+type helpPair struct{ k, d string }
+
+// helpSection groups related shortcuts under a title.
+type helpSection struct {
+	title string
+	keys  []helpPair
+}
+
+// helpSectionsForContext returns only the shortcut groups relevant to the
+// current screen (view, focus, or open modal), so the lightbox shows what
+// the user can actually do right now.
+func (a *App) helpSectionsForContext() []helpSection {
+	st := a.State
+
+	global := helpSection{"Global", []helpPair{
+		{"q / ctrl+c", "quit"},
+		{"ctrl+r", "refresh issues & projects"},
+		{",", "settings (fonts, hints)"},
+		{"? / F1", "this help"},
+	}}
+	closeModal := helpSection{"Modal", []helpPair{
+		{"esc", "close"},
+		{"j / k", "navigate"},
+		{"enter", "submit"},
+	}}
+
+	if st.Modal != ModalNone {
+		switch st.Modal {
+		case ModalHelp:
+			return []helpSection{
+				{"Help", []helpPair{
+					{"esc / ? / F1", "close"},
+				}},
+				global,
+			}
+		case ModalSearch:
+			return []helpSection{
+				{"Search", []helpPair{
+					{"esc / ctrl+k", "close"},
+					{"j / k / ↑ / ↓", "navigate results"},
+					{"ctrl+n / ctrl+p", "next / previous"},
+					{"enter", "open selected"},
+				}},
+				global,
+			}
+		case ModalStatus:
+			return []helpSection{
+				{"Change Status", []helpPair{
+					{"esc / s / ctrl+[", "close"},
+					{"j / k / ↑ / ↓", "navigate"},
+					{"enter", "apply"},
+				}},
+				global,
+			}
+		case ModalTeam:
+			return []helpSection{
+				{"Switch Team", []helpPair{
+					{"esc / ctrl+t", "close"},
+					{"j / k / ↑ / ↓", "navigate"},
+					{"enter", "select team"},
+				}},
+				global,
+			}
+		case ModalComment:
+			return []helpSection{
+				{"Add Update", []helpPair{
+					{"esc", "cancel"},
+					{"ctrl+enter", "submit"},
+				}},
+				global,
+			}
+		case ModalProjectInfo:
+			return []helpSection{
+				{"Project Info", []helpPair{
+					{"esc / h / ctrl+[ / ctrl+i", "close"},
+					{"j / k / ↑ / ↓", "navigate fields"},
+					{"y", "copy selected value"},
+				}},
+				global,
+			}
+		default:
+			return []helpSection{closeModal, global}
+		}
+	}
+
+	switch st.View {
+	case ViewCreateIssue:
+		return []helpSection{
+			{"Create Issue", []helpPair{
+				{"esc / ctrl+[", "cancel"},
+				{"tab / shift+tab", "next / previous field"},
+				{"j / k / ↑ / ↓ / ← / →", "adjust selected field"},
+				{"enter", "submit (on Submit button)"},
+			}},
+			{"Editors", []helpPair{
+				{"ctrl+w / ctrl+bksp", "delete word"},
+				{"ctrl+e", "caret to end"},
+			}},
+			global,
+		}
+	case ViewEditIssue:
+		return []helpSection{
+			{"Edit Issue", []helpPair{
+				{"esc / ctrl+[", "cancel"},
+				{"tab / shift+tab", "next / previous field"},
+				{"j / k / ↑ / ↓ / ← / →", "adjust selected field"},
+				{"enter", "submit (on Submit button)"},
+			}},
+			{"Editors", []helpPair{
+				{"ctrl+w / ctrl+bksp", "delete word"},
+				{"ctrl+e", "caret to end"},
+			}},
+			global,
+		}
+	case ViewIssueDetail:
+		return []helpSection{
+			{"Issue Detail", []helpPair{
+				{"esc / h", "back"},
+				{"j / k / ↑ / ↓", "scroll"},
+				{"ctrl+f / ctrl+b", "page down / up"},
+				{"e", "edit"},
+				{"s", "change status"},
+				{"n", "add update"},
+				{"enter / ctrl+o", "open in browser"},
+				{"y", "copy issue link"},
+			}},
+			global,
+		}
+	case ViewProjectCycles:
+		return []helpSection{
+			{"Project Cycles", []helpPair{
+				{"j / k / ↑ / ↓", "navigate"},
+				{"space / enter", "expand / collapse"},
+				{"ctrl+i", "project info"},
+				{"y", "copy issues"},
+				{"r", "refresh"},
+				{"tab", "switch panel"},
+			}},
+			global,
+		}
+	}
+
+	// ViewIssueList — depends on focus.
+	if st.Focus == FocusSidebar {
+		return []helpSection{
+			{"Sidebar", []helpPair{
+				{"j / k / ↑ / ↓", "navigate"},
+				{"ctrl+f / ctrl+b", "page down / up"},
+				{"enter / l", "select filter"},
+				{"tab", "switch to issues"},
+			}},
+			{"Anywhere", []helpPair{
+				{"c", "create issue"},
+				{"ctrl+k", "search issues"},
+				{"ctrl+t", "switch team"},
+				{"r / ctrl+r", "refresh"},
+			}},
+			global,
+		}
+	}
+
+	main := []helpPair{
+		{"j / k / ↑ / ↓", "navigate"},
+		{"ctrl+f / ctrl+b", "page down / up"},
+		{"enter", "open in browser"},
+		{"l", "open detail"},
+		{"e", "edit"},
+		{"s", "change status"},
+		{"c", "create issue"},
+		{"y", "copy issue link"},
+		{"v", "toggle compact"},
+		{"p", "toggle priority"},
+		{"t", "toggle labels"},
+		{"r", "refresh"},
+		{"h / tab", "back to sidebar"},
+	}
+	if st.ActiveFilter == "My Unlabeled Issues" {
+		main = append([]helpPair{{"t", "auto-label visible issues"}}, main...)
+	}
+	return []helpSection{
+		{"Issues", main},
+		{"Anywhere", []helpPair{
+			{"ctrl+k", "search issues"},
+			{"ctrl+t", "switch team"},
+			{"w", "copy weekly-report prompt"},
+		}},
+		global,
+	}
 }
 
 // --- Status ---
@@ -343,6 +500,7 @@ func (a *App) layoutSearchModal(gtx layout.Context) layout.Dimensions {
 		m.FocusSet = true
 		gtx.Execute(key.FocusCmd{Tag: &m.Query})
 	}
+	m.checkIdentifierLookup(a.State)
 	return a.modalCard(gtx, gtx.Dp(unit.Dp(640)), gtx.Dp(unit.Dp(560)), func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(modalTitle(a.Th, "Search my issues")),
@@ -356,7 +514,14 @@ func (a *App) layoutSearchModal(gtx layout.Context) layout.Dimensions {
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				issues := m.Filter()
 				if len(issues) == 0 {
-					return drawDimText(gtx, a.Th, a.Th.Fonts.Modal, "Loading my issues…")
+					msg := "Loading my issues…"
+					switch {
+					case m.LookupLoading:
+						msg = "Looking up " + m.LookupIdentifier + "…"
+					case m.LookupNotFound:
+						msg = m.LookupIdentifier + " not found"
+					}
+					return drawDimText(gtx, a.Th, a.Th.Fonts.Modal, msg)
 				}
 				if m.Selected >= len(issues) {
 					m.Selected = 0
@@ -558,6 +723,152 @@ func (a *App) confirmTeam() {
 	}
 	t := teams[m.Selected]
 	a.State.PostEvent(TeamSelected{Team: t})
+	a.closeModal()
+}
+
+// --- Project Info (read-only) ---
+
+func (a *App) layoutProjectInfoModal(gtx layout.Context) layout.Dimensions {
+	m, ok := a.State.ModalState.(*ProjectInfoModal)
+	if !ok {
+		return layout.Dimensions{}
+	}
+	th := a.Th
+	fs := th.Fonts.Modal
+	if m.Selected >= len(m.Rows) {
+		m.Selected = 0
+	}
+	return a.modalCard(gtx, gtx.Dp(unit.Dp(620)), gtx.Dp(unit.Dp(560)), func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			// Header: project name + faint esc hint.
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Baseline}.Layout(gtx,
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						l := th.LabelColor(fs, unit.Sp(16), th.AccentDim, m.Name)
+						l.Font.Weight = 700
+						l.MaxLines = 1
+						return l.Layout(gtx)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						hint := "esc"
+						if m.Loading {
+							hint = "loading… · esc"
+						}
+						return th.LabelColor(fs, unit.Sp(10), th.TextMuted, hint).Layout(gtx)
+					}),
+				)
+			}),
+			layout.Rigid(rigidSpace(8)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				h := gtx.Dp(unit.Dp(1))
+				rect(gtx, image.Rect(0, 0, gtx.Constraints.Max.X, h), th.Border)
+				return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, h)}
+			}),
+			layout.Rigid(rigidSpace(6)),
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				if len(m.Rows) == 0 {
+					return drawDimText(gtx, th, fs, "No project information")
+				}
+				return material.List(th.M, &m.List).Layout(gtx, len(m.Rows), func(gtx layout.Context, i int) layout.Dimensions {
+					return projectInfoRow(gtx, th, fs, m.Rows[i], i == m.Selected)
+				})
+			}),
+			layout.Rigid(rigidSpace(6)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return th.LabelColor(fs, unit.Sp(10), th.TextMuted, "j/k navigate · y copy value · esc close").Layout(gtx)
+			}),
+		)
+	})
+}
+
+// projectInfoRow renders one read-only field: an uppercase label above its
+// (wrapping) value, with the selected row drawn on a tinted background.
+func projectInfoRow(gtx layout.Context, th *ui.Theme, fs ui.FontStyle, row ProjectInfoRow, selected bool) layout.Dimensions {
+	macro := op.Record(gtx.Ops)
+	dims := layout.Inset{
+		Top: unit.Dp(5), Bottom: unit.Dp(5),
+		Left: unit.Dp(8), Right: unit.Dp(8),
+	}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				l := th.LabelColor(fs, unit.Sp(10), th.AccentDim, strings.ToUpper(row.Label))
+				l.Font.Weight = 700
+				l.MaxLines = 1
+				return l.Layout(gtx)
+			}),
+			layout.Rigid(rigidSpace(2)),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				col := th.TextDim
+				if selected {
+					col = th.Text
+				}
+				return th.LabelColor(fs, unit.Sp(13), col, row.Value).Layout(gtx)
+			}),
+		)
+	})
+	content := macro.Stop()
+
+	size := image.Pt(gtx.Constraints.Max.X, dims.Size.Y)
+	if selected {
+		rr := gtx.Dp(unit.Dp(5))
+		stack := clip.UniformRRect(image.Rect(0, 0, size.X, size.Y), rr).Push(gtx.Ops)
+		rect(gtx, image.Rect(0, 0, size.X, size.Y), th.Selected)
+		stack.Pop()
+	}
+	content.Add(gtx.Ops)
+	return layout.Dimensions{Size: size}
+}
+
+// --- Comment ---
+
+func (a *App) layoutCommentModal(gtx layout.Context) layout.Dimensions {
+	m, ok := a.State.ModalState.(*CommentModal)
+	if !ok {
+		return layout.Dimensions{}
+	}
+	if !m.FocusSet {
+		m.FocusSet = true
+		gtx.Execute(key.FocusCmd{Tag: &m.Body})
+	}
+	th := a.Th
+	fs := th.Fonts.Modal
+	return a.modalCard(gtx, gtx.Dp(unit.Dp(640)), gtx.Dp(unit.Dp(420)), func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Baseline}.Layout(gtx,
+					layout.Rigid(modalTitle(th, "Add Update")),
+					layout.Rigid(rigidSpace(12)),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						l := th.LabelColor(fs, unit.Sp(12), th.TextMuted, m.Issue.Identifier+" · "+m.Issue.Title)
+						l.MaxLines = 1
+						return l.Layout(gtx)
+					}),
+				)
+			}),
+			layout.Rigid(rigidSpace(16)),
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				ed := editorStyle(th, &m.Body, "Write an update…", th.Text, fs)
+				gtx.Constraints.Min.X = gtx.Constraints.Max.X
+				return widgetBox(gtx, th, ed.Layout)
+			}),
+			layout.Rigid(rigidSpace(16)),
+			layout.Rigid(a.modalButtons(&m.Cancel, &m.Submit, "Cancel", "Post", a.confirmComment, false)),
+		)
+	})
+}
+
+func (a *App) confirmComment() {
+	m, ok := a.State.ModalState.(*CommentModal)
+	if !ok {
+		return
+	}
+	body := strings.TrimSpace(m.Body.Text())
+	if body == "" {
+		a.State.StatusText = "Update is empty"
+		a.State.StatusKind = StatusWarn
+		return
+	}
+	go createComment(a.State, m.Issue.ID, m.Issue.Identifier, body)
 	a.closeModal()
 }
 
@@ -908,7 +1219,6 @@ func cycleNames(c []linear.Cycle) []string {
 
 // --- Settings ---
 
-
 // --- Modal key handling ---
 
 func (a *App) handleModalKey(ke key.Event) {
@@ -917,7 +1227,12 @@ func (a *App) handleModalKey(ke key.Event) {
 		a.closeModal()
 		return
 	case "[":
-		if ke.Modifiers.Contain(key.ModCtrl) && a.State.Modal == ModalStatus {
+		if ke.Modifiers.Contain(key.ModCtrl) && (a.State.Modal == ModalStatus || a.State.Modal == ModalProjectInfo) {
+			a.closeModal()
+			return
+		}
+	case "H":
+		if ke.Modifiers == 0 && a.State.Modal == ModalProjectInfo {
 			a.closeModal()
 			return
 		}
@@ -933,8 +1248,17 @@ func (a *App) handleModalKey(ke key.Event) {
 			a.confirmTeam()
 		case ModalHelp:
 			a.closeModal()
+		case ModalComment:
+			if ke.Modifiers.Contain(key.ModCtrl) {
+				a.confirmComment()
+			}
 		}
 		return
+	case "?":
+		if a.State.Modal == ModalHelp {
+			a.closeModal()
+			return
+		}
 	case "S":
 		if ke.Modifiers == 0 && a.State.Modal == ModalStatus {
 			a.closeModal()
@@ -943,6 +1267,18 @@ func (a *App) handleModalKey(ke key.Event) {
 	case "T":
 		if ke.Modifiers == key.ModCtrl && a.State.Modal == ModalTeam {
 			a.closeModal()
+			return
+		}
+	case "I":
+		if ke.Modifiers == key.ModCtrl && a.State.Modal == ModalProjectInfo {
+			a.closeModal()
+			return
+		}
+	case "Y":
+		if a.State.Modal == ModalProjectInfo {
+			if m, ok := a.State.ModalState.(*ProjectInfoModal); ok {
+				go CopyProjectInfoRow(a.State, m)
+			}
 			return
 		}
 	case "K", key.NameUpArrow:
@@ -994,6 +1330,12 @@ func (a *App) modalMove(d int) {
 			return
 		}
 		m.Selected = clamp(m.Selected+d, 0, len(teams)-1)
+	case *ProjectInfoModal:
+		if len(m.Rows) == 0 {
+			return
+		}
+		m.Selected = clamp(m.Selected+d, 0, len(m.Rows)-1)
+		scrollListIntoView(&m.List, m.Selected)
 	}
 }
 

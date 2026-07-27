@@ -22,6 +22,36 @@ type Project struct {
 	Lead   *User         `json:"lead"`
 }
 
+// ProjectDetail is the full, read-only set of fields for a single project,
+// shown in the project info overlay (Ctrl+I). TimelessDate fields (startDate,
+// targetDate) come back as plain "2006-01-02" strings; DateTime fields are
+// parsed into time.Time.
+type ProjectDetail struct {
+	ID            string        `json:"id"`
+	Name          string        `json:"name"`
+	Description   string        `json:"description"`
+	Content       string        `json:"content"`
+	State         string        `json:"state"`
+	Status        ProjectStatus `json:"status"`
+	Priority      int           `json:"priority"`
+	PriorityLabel string        `json:"priorityLabel"`
+	Progress      float64       `json:"progress"`
+	Scope         float64       `json:"scope"`
+	StartDate     string        `json:"startDate"`
+	TargetDate    string        `json:"targetDate"`
+	StartedAt     *time.Time    `json:"startedAt"`
+	CompletedAt   *time.Time    `json:"completedAt"`
+	CanceledAt    *time.Time    `json:"canceledAt"`
+	CreatedAt     time.Time     `json:"createdAt"`
+	UpdatedAt     time.Time     `json:"updatedAt"`
+	URL           string        `json:"url"`
+	SlugID        string        `json:"slugId"`
+	Lead          *User         `json:"lead"`
+	Members       struct {
+		Nodes []User `json:"nodes"`
+	} `json:"members"`
+}
+
 // Cycle represents a Linear cycle.
 type Cycle struct {
 	ID          string     `json:"id"`

@@ -22,3 +22,10 @@ const mutationCreateLabel = `mutation CreateLabel($name: String!, $teamId: Strin
 		issueLabel { id }
 	}
 }`
+
+const mutationCreateComment = `mutation CreateComment($issueId: String!, $body: String!) {
+	commentCreate(input: { issueId: $issueId, body: $body }) {
+		success
+		comment { id }
+	}
+}`
